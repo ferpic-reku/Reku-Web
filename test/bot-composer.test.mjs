@@ -123,7 +123,7 @@ test('consent and Comenzar live below the steps, outside the initially hidden ch
   const intro = html.match(/<aside class="intro" id="intro">([\s\S]*?)<\/aside>/)[1];
   assert.match(intro, /id="step-report"[\s\S]*id="start-panel"[\s\S]*id="consent"[\s\S]*id="start"[^>]*>Comenzar/);
   assert.match(html, /id="chat-card"[^>]* hidden>/);
-  assert.match(intro, /Este asistente usa OpenAI para procesar tu texto y transcribir tus audios\. Organiza tu relato; no realiza diagnósticos ni indica tratamientos\./);
+  assert.match(intro, /Este asistente usa OpenAI para procesar tu texto y transcribir tus audios\. Solo organiza tu relato; no realiza diagnósticos ni indica tratamientos\./);
   assert.doesNotMatch(html, /La conversación queda disponible/);
   const css = await readFile(new URL('../bot/styles.css', import.meta.url), 'utf8');
   assert.match(css, /\.layout:not\(\.awaiting-start\)\{display:block;max-width:820px;margin:0 auto\}/);
