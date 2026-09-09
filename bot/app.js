@@ -15,6 +15,7 @@
   let pendingMessage = null;
   let available = false;
   let visitEnded = false;
+  let accessMessage = '';
   const welcome = [
     'Hola, bienvenido a Reku. Necesitamos que nos cuentes el motivo de tu consulta: si es una lesión o una dolencia que venís arrastrando, cómo empezó, en qué zona, cuánto te duele del 1 al 10 y desde hace cuánto tiempo.',
     'Podés escribirlo o, si te resulta más cómodo, mandar un audio.',
@@ -62,8 +63,11 @@
     $('brand-caption').textContent = brand.slug ? `${brand.name} · Telerehabilitación con Reku` : 'Reku · Telerehabilitación con acompañamiento profesional';
   };
   const render = () => {
+    $('access-notice').hidden = !accessMessage;
+    $('access-notice').textContent = accessMessage;
+    $('messages').hidden = Boolean(accessMessage);
     renderMessages(session?.messages || welcome.map(text => ({ role: 'assistant', text })));
-    $('start-panel').hidden = Boolean(session);
+    $('start-panel').hidden = Boolean(session) || Boolean(accessMessage);
     const done = session && session.status !== 'collecting';
     $('composer').hidden = !session || done;
     $('result').hidden = !done;
@@ -241,13 +245,21 @@
   const init = async () => {
     render();
     try {
+      const linkToken = new URLSearchParams((location.hash || '').slice(1)).get('appointment');
+      if (linkToken !== null) {
+        // Private access tokens never remain in navigation/history or query URLs.
+        history.replaceState(null, '', location.pathname + location.search);
+        try { await api('access', { token: linkToken }); }
+        catch (error) { accessMessage = error.message; available = false; render(); return; }
+      }
       await api('reset', {});
       if (visitEnded) return;
       const context = await api('context');
       if (visitEnded) return;
-      available = context.available; brandPage(context.brand);
+      accessMessage = context.access?.allowed === false ? context.access.message : '';
+      available = context.available && !accessMessage; brandPage(context.brand);
       session = null; $('message').value = ''; $('consent').checked = false; render();
-      if (!available) showError('El asistente todavía no está disponible.');
+      if (!available && !accessMessage) showError('El asistente todavía no está disponible.');
     } catch (error) { showError(error.message || 'No pudimos iniciar el asistente. Recargá la página.'); }
   };
   init();

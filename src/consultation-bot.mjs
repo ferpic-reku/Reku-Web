@@ -9,6 +9,8 @@ import { transcribeConsultation, botSettings } from "./consultation-bot-ai.mjs";
 import { advanceConsultation } from "./consultation-bot-conversation.mjs";
 import { loadBotBrandLogo, renderConsultationReport } from "./consultation-bot-report.mjs";
 import { buildConsultationNarrative, cachedConsultationNarrative } from "./consultation-bot-narrative.mjs";
+import { consultationBotMode, requireBotAppointment, botAppointmentCookie, botAccessMessages,
+  beginBotAppointmentAction, finishBotAppointmentAction } from "./consultation-bot-access.mjs";
 
 export const welcomeMessages = [
   "Hola, bienvenido a Reku. Necesitamos que nos cuentes el motivo de tu consulta: si es una lesión o una dolencia que venís arrastrando, cómo empezó, en qué zona, cuánto te duele del 1 al 10 y desde hace cuánto tiempo.",
@@ -50,6 +52,7 @@ const context = request => resolveBotBrand(request);
 export const handleConsultationBot = async (request, response, url) => {
   try {
     const action = url.pathname.slice("/api/bot/".length);
+    const productionAccess = consultationBotMode() === "production";
     if (request.method === "GET" && action === "logo") {
       const logo = await loadBotBrandLogo(await context(request, url));
       if (!logo) throw fail("Logo no encontrado.", 404);
@@ -58,10 +61,26 @@ export const handleConsultationBot = async (request, response, url) => {
       return;
     }
     if (request.method === "GET" && action === "context") {
-      sendJson(response, 200, { brand: await context(request, url), available: Boolean(botSettings.apiKey) });
+      let access = { allowed: true };
+      if (productionAccess) {
+        try { await requireBotAppointment(request); }
+        catch (error) {
+          if (!error.publicMessage) throw error;
+          access = { allowed: false, message: error.publicMessage };
+        }
+      }
+      sendJson(response, 200, { brand: await context(request, url), available: Boolean(botSettings.apiKey), access });
       return;
     }
     if (request.method === "POST") requireBotOrigin(request);
+    if (request.method === "POST" && action === "access") {
+      if (!productionAccess) { sendJson(response, 200, { ok: true }); return; }
+      await consumeRateLimit({ scope: "bot.access", key: getClientIp(request), limit: 30, windowSeconds: 3600 });
+      const body = JSON.parse(await readBody(request, 1000));
+      await requireBotAppointment(request, { token: body.token });
+      sendJson(response, 200, { ok: true }, { "Set-Cookie": botAppointmentCookie(body.token) });
+      return;
+    }
     const token = parseCookies(request)[cookieName];
     let session = sessions.get(token);
     if (session && (session.expiresAt < Date.now() || session.host !== request.headers.host)) session = null;
@@ -86,6 +105,7 @@ export const handleConsultationBot = async (request, response, url) => {
     if (request.method === "POST" && action === "session") {
       const body = JSON.parse(await readBody(request, 1000));
       if (body.consent !== true) throw fail("Necesitamos tu aceptación para procesar el relato.");
+      const appointmentAccess = productionAccess ? await requireBotAppointment(request) : null;
       if (!botSettings.apiKey) throw fail("El asistente todavía no está disponible.", 503);
       await consumeRateLimit({ scope: "bot.sessions", key: getClientIp(request), limit: 12, windowSeconds: 3600 });
       cleanSessions();
@@ -95,6 +115,7 @@ export const handleConsultationBot = async (request, response, url) => {
       const id = randomBytes(32).toString("hex");
       session = {
         host: request.headers.host, brand, data: null, status: "collecting", busy: false,
+        appointmentId: appointmentAccess?.appointment_id || null,
         createdAt: Date.now(), updatedAt: Date.now(), expiresAt: Date.now() + ttl,
         version: 0, lastRequestId: null, audioCount: 0,
         instanceId: randomBytes(12).toString("hex"),
@@ -106,6 +127,10 @@ export const handleConsultationBot = async (request, response, url) => {
       return;
     }
     if (!session) throw fail("La sesión terminó. Iniciá una nueva conversación.", 401);
+    if (productionAccess) {
+      const access = await requireBotAppointment(request, { allowCompleted: session.status !== "collecting" });
+      if (String(access.appointment_id) !== String(session.appointmentId)) throw fail(botAccessMessages.required, 403);
+    }
     if ((await context(request, url)).slug !== session.brand.slug) throw fail("Esta conversación corresponde a otro acuerdo. Iniciá una nueva conversación.", 409);
     if (request.method === "GET" && action === "report") {
       if (!session.data || session.status === "collecting") throw fail("Primero completá la conversación.", 409);
@@ -126,6 +151,7 @@ export const handleConsultationBot = async (request, response, url) => {
     if (activeRequests >= 6) throw fail("El asistente está ocupado. Intentá de nuevo en unos segundos.", 503);
     activeRequests++;
     session.busy = true;
+    let reservation;
     try {
       if (action === "message") {
         const body = JSON.parse(await readBody(request, 80_000));
@@ -133,10 +159,11 @@ export const handleConsultationBot = async (request, response, url) => {
         if (typeof body.requestId !== "string" || !/^[\w-]{10,80}$/.test(body.requestId)) throw fail("Mensaje inválido.");
         if (body.requestId === session.lastRequestId) { sendJson(response, 200, { session: present(session) }); return; }
         if (body.version !== session.version) throw fail("La conversación cambió en otra ventana. Recargá para continuar.", 409);
-        if (session.status !== "collecting") throw fail("La entrevista ya finalizó. Podés comenzar una nueva para corregir el relato.", 409);
+        if (session.status !== "collecting") throw fail(productionAccess ? botAccessMessages.completed : "La entrevista ya finalizó. Podés comenzar una nueva para corregir el relato.", 409);
         const text = typeof body.text === "string" ? body.text.trim() : "";
         if (!text || text.length > 12000) throw fail("El mensaje puede tener hasta 12000 caracteres.");
         await enforceAIQuota(request);
+        if (productionAccess) reservation = await beginBotAppointmentAction(request, session.appointmentId, "message");
         const messages = [...session.messages, { role: "user", text }];
         const diagnostics = [];
         const { data, next } = await advanceConsultation(session, messages, { onFollowupDecision: event => diagnostics.push({ ...event, turn: session.version + 1 }) });
@@ -144,6 +171,12 @@ export const handleConsultationBot = async (request, response, url) => {
         const reply = exhausted && !next.complete && !next.urgent
           ? "Gracias por tu tiempo. Dejamos un informe parcial con lo que nos contaste y los datos pendientes para revisar con el profesional. Podés descargarlo acá abajo."
           : next.text;
+        // Commit the one-use marker before exposing a completed interview.
+        // A lost HTTP response cannot grant a new interview on another device.
+        if (productionAccess) {
+          await finishBotAppointmentAction(reservation, { completed: Boolean(next.urgent || next.complete || exhausted) });
+          reservation = null;
+        }
         session.messages = [...messages, { role: "assistant", text: reply }];
         session.data = data;
         session.lastQuestion = next;
@@ -155,15 +188,23 @@ export const handleConsultationBot = async (request, response, url) => {
         session.updatedAt = Date.now();
         sendJson(response, 200, { session: present(session) });
       } else {
-        if (session.status !== "collecting") throw fail("La entrevista ya finalizó.", 409);
+        if (session.status !== "collecting") throw fail(productionAccess ? botAccessMessages.completed : "La entrevista ya finalizó.", 409);
         if (session.audioCount >= 15) throw fail("Llegaste al límite de audios. Podés seguir escribiendo.", 429);
         await enforceAIQuota(request);
         session.audioCount++;
         const { files } = await parseMultipartForm(request, { maxBytes: 8 * 1024 * 1024, maxFiles: 1 });
+        if (productionAccess) reservation = await beginBotAppointmentAction(request, session.appointmentId, "transcribe");
         const text = await transcribeConsultation(files.audio);
+        if (productionAccess) {
+          await finishBotAppointmentAction(reservation);
+          reservation = null;
+        }
         sendJson(response, 200, { text });
       }
-    } finally { session.busy = false; activeRequests--; }
+    } finally {
+      try { if (reservation) await finishBotAppointmentAction(reservation); }
+      finally { session.busy = false; activeRequests--; }
+    }
   } catch (error) {
     const status = error.message === "RATE_LIMITED" ? 429 : error.message === "PAYLOAD_TOO_LARGE" ? 413 : error instanceof SyntaxError ? 422 : error.statusCode || 502;
     const message = error.publicMessage || (status === 429 ? "Llegaste al límite de solicitudes. Probá más tarde." : status === 413 ? "El audio es demasiado grande. Usá uno de hasta 8 MB." : error.message === "BOT_AUDIO_TYPE" ? "Usá un audio MP3, M4A, WAV, OGG o WebM." : "No pudimos procesarlo. Tu conversación sigue disponible; intentá de nuevo o escribí el mensaje.");

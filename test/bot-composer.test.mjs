@@ -11,7 +11,7 @@ test('audio button stays light green before recording and when ready to send', a
   assert.match(css, /#record:not\(:disabled\):hover\{background:#cdebd9\}/);
 });
 
-const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {}, autoStart = true, resetFails = false, transcription = 'Me duele la rodilla derecha', transcriptionFailures = 0 } = {}) => {
+const setup = async ({ audioLevel = 0.02, search = '', hash = '', sessionOverrides = {}, autoStart = true, resetFails = false, transcription = 'Me duele la rodilla derecha', transcriptionFailures = 0, access = { allowed: true } } = {}) => {
   let focused;
   const element = tagName => ({
     tagName, children: [],
@@ -29,6 +29,7 @@ const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {}, au
   let resolveRequest;
   const requests = [];
   const urls = [];
+  const replacedHistory = [];
   const audioRequests = [];
   const diagnostics = [];
   const windowHandlers = {};
@@ -57,7 +58,7 @@ const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {}, au
   const response = (data, ok = true) => ({ ok, json: async () => data });
   vm.runInNewContext(await readFile(new URL('../bot/app.js', import.meta.url), 'utf8'), {
     document: { getElementById: get, createElement: element, createTextNode: text => text, body: element() },
-    location: { search, reload: () => reloads++ }, window: { addEventListener: (event, fn) => { windowHandlers[event] = fn; }, AudioContext, MediaRecorder },
+    location: { search, hash, pathname: '/bot', reload: () => reloads++ }, history: { replaceState: (_state, _title, url) => replacedHistory.push(url) }, window: { addEventListener: (event, fn) => { windowHandlers[event] = fn; }, AudioContext, MediaRecorder },
     navigator: { sendBeacon: (url, body) => { beacons.push({ url, body }); return true; }, mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } },
     MediaRecorder, File, Blob, Date: { now: () => now },
     console: { info: (...args) => diagnostics.push(args) },
@@ -66,8 +67,9 @@ const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {}, au
     URLSearchParams, URL, FormData, AbortSignal, crypto: { randomUUID },
     fetch: async (url, options) => {
       urls.push(url);
+      if (url.endsWith('/access')) { assert.equal(replacedHistory.length, 1); assert.equal(JSON.parse(options.body).token, 'private-test-token'); return response({ ok: true }); }
       if (url.endsWith('/reset')) { assert.equal(options.method, 'POST'); return response(resetFails ? { error: 'Reset failed' } : { session: null }, !resetFails); }
-      if (url.endsWith('/context')) return response({ available: true, brand: session.brand });
+      if (url.endsWith('/context')) return response({ available: true, brand: session.brand, access });
       if (url.endsWith('/session')) { assert.equal(options.method, 'POST', 'Never restore a previous session'); return response({ session }); }
       if (url.endsWith('/transcribe')) {
         audioRequests.push(options.body);
@@ -79,11 +81,11 @@ const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {}, au
     },
   });
   await new Promise(resolve => setImmediate(resolve));
-  if (autoStart && !resetFails) await get('start').handlers.click();
+  if (autoStart && !resetFails && access.allowed) await get('start').handlers.click();
   const submit = () => get('composer').handlers.submit({ preventDefault() {} });
   get('composer').requestSubmit = submit;
   return {
-    get, submit, requests, urls, audioRequests, diagnostics, windowHandlers, beacons, reloads: () => reloads, focused: () => focused,
+    get, submit, requests, urls, replacedHistory, audioRequests, diagnostics, windowHandlers, beacons, reloads: () => reloads, focused: () => focused,
     sampleAudio: () => { for (const timer of timers.values()) if (timer.ms === 50) for (let i = 0; i < 6; i++) timer.callback(); },
     tickRecording: ms => { now += ms; for (const timer of timers.values()) if (timer.ms === 500) timer.callback(); },
     finish: (ok = true, overrides = {}) => resolveRequest(response(ok ? { session: { ...session, version: 1, ...overrides } } : { error: 'Error de prueba' }, ok)),
@@ -100,6 +102,22 @@ for (const status of ['complete', 'partial', 'urgent']) test('finished ' + statu
   assert.equal(app.get('summary').children.length, 0);
   assert.equal(app.get('messages').children.length, 1);
   assert.equal(data.followups[0].answer, 'Me cuesta caminar');
+});
+test('private appointment token is removed from navigation before its POST exchange', async () => {
+  const app = await setup({ hash: '#appointment=private-test-token', autoStart: false });
+  assert.deepEqual(app.replacedHistory, ['/bot']);
+  assert.deepEqual(app.urls, ['/api/bot/access', '/api/bot/reset', '/api/bot/context']);
+});
+test('access denial hides the interview and consent and displays the friendly message', async () => {
+  for (const message of ['Ingresá desde el enlace de tu turno.', 'Ya completaste la entrevista para este turno.']) {
+    const app = await setup({ access: { allowed: false, message } });
+    assert.equal(app.get('access-notice').textContent, message);
+    assert.equal(app.get('access-notice').hidden, false);
+    assert.equal(app.get('messages').hidden, true);
+    assert.equal(app.get('start-panel').hidden, true);
+    assert.equal(app.get('start').disabled, true);
+    assert.equal(app.urls.includes('/api/bot/session'), false);
+  }
 });
 test('each visit resets before starting and never restores a finished conversation', async () => {
   const app = await setup({ autoStart: false, sessionOverrides: { status: 'complete', messages: [{ role: 'user', text: 'Conversación anterior' }] } });

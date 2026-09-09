@@ -1,5 +1,21 @@
 # Entrevista del bot Reku
 
+## Acceso de prueba y producción
+
+`CONSULTATION_BOT_MODE=test` (predeterminado) mantiene la demostración pública y una conversación nueva en cada visita. `CONSULTATION_BOT_MODE=production` exige un turno confirmado, no cancelado ni finalizado, mediante su enlace privado vigente y no revocado. Cualquier otro valor bloquea el servicio; no hay override por URL, subdominio, cuerpo JSON ni navegador. Copiar la variable de `.env.bot.example` al `.env` del despliegue y recrear sólo `web` para cambiar el modo. Compose ya carga ese archivo con `env_file`; no se requiere modificar su configuración.
+
+Integración preparada, todavía **sin agregar enlaces ni redirecciones al alta/turnos**: abrir `https://<acuerdo>.reku.io/bot#appointment=<token-del-enlace-privado-del-turno>` (o dominio general si el turno no tiene acuerdo). Es el token aleatorio existente de `patient_appointment_access_links`, no un id de turno, email, DNI ni token de alta. El navegador lo quita del fragmento inmediatamente y lo canjea por POST `/api/bot/access` por una cookie HttpOnly, SameSite=Strict, host-only y Path=/api/bot/. Cada operación valida nuevamente el token contra su hash, turno y subdominio; un enlace revocado/cancelado deja de autorizar. Estos enlaces son privados y no deben publicarse ni incluirse como query param.
+
+Una entrevista por **turno**, no una prohibición de por vida por paciente: otro turno confirmado tiene su propio cupo. `consultation_bot_usage` guarda únicamente id de turno, fecha de finalización, contadores y bloqueo temporal de petición: nunca audios, conversación ni informe clínico. Completada, cierre parcial por límite o interrupción urgente consumen el uso. El cierre se confirma en PostgreSQL antes de mostrar el resultado; ni nuevas cookies, nuevas pestañas, un enlace renovado ni reiniciar el servidor borran esa marca. El PDF final de la sesión actual sigue descargable con autorización, sin habilitar otra entrevista.
+
+Los máximos de 25 mensajes y 15 audios se acumulan por turno aun si se recarga o falla el proveedor. Un bloqueo transaccional permite sólo una operación de IA simultánea por turno; en un cierre abrupto del servidor vence a los cinco minutos. Reintentar una respuesta ya procesada dentro de la misma sesión sigue siendo idempotente. No se libera el cupo completado desde reset/close. Siguen vigentes los límites por IP y globales. El modo test no lee ni escribe este registro y no consume el cupo de ningún turno.
+
+Mensajes de acceso: «Este asistente está disponible para pacientes con un turno confirmado. Ingresá desde el enlace de tu turno.» y «¡Gracias! Ya completaste la entrevista para este turno. No hace falta que la vuelvas a realizar.». Se ocultan el consentimiento y el inicio cuando no hay acceso.
+
+Antes de activar este modo en el circuito clínico falta conectar el enlace desde la reserva y persistir/publicar el informe en la sala de espera y ficha profesional. Este cambio **no** guarda el informe al finalizar: continúa disponible sólo en la sesión temporal, como en la prueba actual. No activar el circuito de un solo uso para pacientes reales hasta completar esa entrega durable del informe.
+
+Prueba de concurrencia con PostgreSQL aislado: `TEST_DATABASE_URL=postgres://.../reku_bot_access_test node --test integration/consultation-bot-access.test.mjs`. Crea y elimina sólo su esquema efímero; rechaza bases cuyo nombre no contenga `test`.
+
 ## Acuerdo por subdominio
 
 El bot obtiene el acuerdo exclusivamente del subdominio registrado: `https://ypf.reku.io/bot`. Usa `subdomain_prefix` para buscar el acuerdo, no presupone que sea igual al slug. Logo, sesión y PDF conservan ese acuerdo. `https://www.reku.io/bot` es la versión general: `?form=` no selecciona ni cambia el acuerdo. Un subdominio de acuerdo inexistente devuelve 404. Las cookies siguen siendo host-only y no se comparten conversaciones entre acuerdos. No cambia la resolución de los formularios o turnos existentes.
