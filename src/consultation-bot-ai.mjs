@@ -19,7 +19,7 @@ const complaintProperties = {
   limitations: string,
   evidence: {
     type: "object", additionalProperties: false,
-    properties: Object.fromEntries(evidenceKeys.map(key => [key, string])),
+    properties: Object.fromEntries(evidenceKeys.map(key => [key, { ...string, description: "Cita literal copiada del paciente, sin reformular ni cambiar género o conjugación. Por ejemplo: hombro izquierdo, no izquierda." }])),
     required: evidenceKeys,
   },
 };
@@ -61,14 +61,14 @@ Si ante una pregunta el paciente explícitamente no sabe o no desea responder, r
 urgent=true sólo ante síntomas expresamente relatados de posible urgencia actual: dolor de pecho con falta de aire, lesión con deformidad o imposibilidad de apoyar tras trauma, fiebre con articulación caliente/hinchada, pérdida nueva de fuerza/sensibilidad, pérdida nueva de control de esfínteres o anestesia perineal, o dolor actual insoportable 10/10. No diagnostiques la causa. Diferenciá negaciones y hechos pasados/resueltos. urgentReason cita brevemente lo relatado. Si no hay relato de alarma, urgent=false y urgentReason=null; esto NO significa que se hayan descartado urgencias.
 Escribí en español rioplatense conciso. No incluyas nombres, emails ni otros identificadores aunque aparezcan; es una prueba sin ficha de paciente.`;
 
-export const analyzeConsultation = async (messages, { fetchImpl = fetch, settings = botSettings } = {}) => {
+export const analyzeConsultation = async (messages, { fetchImpl = fetch, settings = botSettings, repairEvidence = false } = {}) => {
   if (!settings.apiKey) throw new Error("BOT_NOT_CONFIGURED");
   const response = await fetchImpl("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { Authorization: `Bearer ${settings.apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: settings.model, store: false, max_output_tokens: 2400,
-      instructions,
+      model: settings.model, store: false, max_output_tokens: 3500, temperature: 0,
+      instructions: instructions + (repairEvidence ? "\nREVISIÓN DE EVIDENCIA: copiá las citas exactamente del mensaje original. No uses sinónimos ni cambies terminaciones. Si dice 'izquierdo', evidence.side debe citar 'izquierdo', aunque side normalizado sea 'izquierda'. Si dice 'cuando levanto el brazo', citá eso, no 'dolor al levantar el brazo'. Recuperá todos los datos ya aportados." : ""),
       input: messages.map(({ role, text }) => ({ role, content: text })),
       text: { format: { type: "json_schema", name: "reku_consultation", strict: true, schema: intakeSchema } },
     }),
@@ -82,6 +82,12 @@ export const analyzeConsultation = async (messages, { fetchImpl = fetch, setting
   if (!data || !Array.isArray(data.complaints) || data.complaints.length > 5 || typeof data.urgent !== "boolean") throw new Error("BOT_INVALID_RESPONSE");
   const normalize = (text) => String(text || "").normalize("NFC").replace(/\s+/g, " ").trim().toLowerCase();
   const patientMessages = messages.filter(message => message.role === "user").map(message => normalize(message.text));
+  const grounded = (quote) => Boolean(normalize(quote)) && patientMessages.some(message => message.includes(normalize(quote)));
+  // Repair a paraphrased citation internally; the patient should never have to
+  // repeat information just because the extractor formatted its evidence badly.
+  if (!repairEvidence && data.complaints.some(item => evidenceKeys.some(key => item[key] !== null && !grounded(item.evidence?.[key])))) {
+    return analyzeConsultation(messages, { fetchImpl, settings, repairEvidence: true });
+  }
   for (const item of data.complaints) {
     if (!item || (item.pain !== null && (!Number.isFinite(item.pain) || item.pain < 0 || item.pain > 10))) throw new Error("BOT_INVALID_RESPONSE");
     for (const [key, value] of Object.entries(item)) {
@@ -94,6 +100,13 @@ export const analyzeConsultation = async (messages, { fetchImpl = fetch, setting
         if (key === "pain") item.painNote = null;
         if (key === "location") item.locationClear = false;
       }
+    }
+    // A side explicitly present in an evidence-backed location is already known.
+    if (!item.side && item.location && grounded(item.evidence?.location)) {
+      const location = normalize(item.location);
+      const quote = normalize(item.evidence.location);
+      const sides = ["izquierd", "derech"].filter(side => new RegExp(`\\b${side}[oa]\\b`).test(location) && new RegExp(`\\b${side}[oa]\\b`).test(quote));
+      if (sides.length) item.side = sides.length === 2 ? "ambos lados" : sides[0] === "izquierd" ? "izquierdo" : "derecho";
     }
   }
   return data;

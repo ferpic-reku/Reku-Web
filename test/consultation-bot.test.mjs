@@ -53,6 +53,22 @@ test("extraction rejects fields without literal patient evidence and disables pr
 test("audio rejects unsupported types before contacting the provider", async () => {
   await assert.rejects(transcribeConsultation({ mimeType: "text/plain", buffer: Buffer.from("hello") }), /BOT_AUDIO_TYPE/);
 });
+
+test("a paraphrased side citation is repaired without asking the patient again", async () => {
+  const data = complete();
+  data.complaints[0] = { ...data.complaints[0], reason: "dolor", location: "hombro izquierdo", side: "izquierda", onset: "un mes", mechanism: "caja pesada", pain: 6, evidence: { reason: "Me duele", location: "hombro izquierdo", side: "izquierda", onset: "un mes", mechanism: "caja pesada", pain: "6 de 10", limitations: null } };
+  let calls = 0;
+  const result = await analyzeConsultation([{ role: "user", text: "Me duele el hombro izquierdo hace un mes por una caja pesada. 6 de 10." }], {
+    settings: { apiKey: "test", model: "test" },
+    fetchImpl: async () => {
+      calls++;
+      return { ok: true, json: async () => ({ status: "completed", output: [{ content: [{ type: "output_text", text: JSON.stringify(data) }] }] }) };
+    },
+  });
+  assert.equal(calls, 2);
+  assert.equal(result.complaints[0].side, "izquierdo");
+  assert.equal(nextConsultationStep(result).complete, true);
+});
 test("bot mutations reject missing and foreign origins", () => {
   assert.throws(() => requireBotOrigin({ headers: { host: "www.reku.io" } }), /Recargá/);
   assert.throws(() => requireBotOrigin({ headers: { host: "www.reku.io", origin: "https://evil.test" } }), /Origen/);
