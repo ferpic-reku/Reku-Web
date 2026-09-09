@@ -33,7 +33,7 @@ test('recording cancellation sits beside audio send and the textbox cannot be re
   assert.match(html, /class="recording-timer">Grabando <strong id="timer">0:00<\/strong><\/div>\s*<div class="recording-help">Tocá Enviar/);
 });
 
-const setup = async ({ audioLevel = 0.02, search = '', hash = '', sessionOverrides = {}, autoStart = true, resetFails = false, transcription = 'Me duele la rodilla derecha', transcriptionFailures = 0, access = { allowed: true } } = {}) => {
+const setup = async ({ audioLevel = 0.02, search = '', hash = '', sessionOverrides = {}, autoStart = true, resetFails = false, sessionFails = false, transcription = 'Me duele la rodilla derecha', transcriptionFailures = 0, access = { allowed: true } } = {}) => {
   let focused;
   const element = tagName => ({
     tagName, children: [],
@@ -58,6 +58,7 @@ const setup = async ({ audioLevel = 0.02, search = '', hash = '', sessionOverrid
   const beacons = [];
   let reloads = 0;
   const timers = new Map();
+  const timeouts = new Map();
   let timerId = 0;
   let now = 0;
   class AudioContext {
@@ -86,13 +87,15 @@ const setup = async ({ audioLevel = 0.02, search = '', hash = '', sessionOverrid
     console: { info: (...args) => diagnostics.push(args) },
     setInterval: (callback, ms) => { timers.set(++timerId, { callback, ms }); return timerId; },
     clearInterval: id => timers.delete(id),
+    setTimeout: (callback, ms) => { timeouts.set(++timerId, { callback, at: now + ms }); return timerId; },
+    clearTimeout: id => timeouts.delete(id),
     URLSearchParams, URL, FormData, AbortSignal, crypto: { randomUUID },
     fetch: async (url, options) => {
       urls.push(url);
       if (url.endsWith('/access')) { assert.equal(replacedHistory.length, 1); assert.equal(JSON.parse(options.body).token, 'private-test-token'); return response({ ok: true }); }
       if (url.endsWith('/reset')) { assert.equal(options.method, 'POST'); return response(resetFails ? { error: 'Reset failed' } : { session: null }, !resetFails); }
       if (url.endsWith('/context')) return response({ available: true, brand: session.brand, access });
-      if (url.endsWith('/session')) { assert.equal(options.method, 'POST', 'Never restore a previous session'); return response({ session }); }
+      if (url.endsWith('/session')) { assert.equal(options.method, 'POST', 'Never restore a previous session'); return response(sessionFails ? { error: 'No pudimos comenzar' } : { session }, !sessionFails); }
       if (url.endsWith('/transcribe')) {
         audioRequests.push(options.body);
         if (transcriptionFailures-- > 0) return response({ error: 'Error temporal' }, false);
@@ -103,16 +106,71 @@ const setup = async ({ audioLevel = 0.02, search = '', hash = '', sessionOverrid
     },
   });
   await new Promise(resolve => setImmediate(resolve));
-  if (autoStart && !resetFails && access.allowed) await get('start').handlers.click();
+  if (autoStart && !resetFails && access.allowed) { get('consent').checked = true; await get('start').handlers.click(); }
   const submit = () => get('composer').handlers.submit({ preventDefault() {} });
   get('composer').requestSubmit = submit;
   return {
     get, submit, requests, urls, replacedHistory, audioRequests, diagnostics, windowHandlers, beacons, reloads: () => reloads, focused: () => focused,
     sampleAudio: () => { for (const timer of timers.values()) if (timer.ms === 50) for (let i = 0; i < 6; i++) timer.callback(); },
     tickRecording: ms => { now += ms; for (const timer of timers.values()) if (timer.ms === 500) timer.callback(); },
+    tickWelcome: ms => { now += ms; for (const [id, timer] of timeouts) if (timer.at <= now) { timeouts.delete(id); timer.callback(); } },
     finish: (ok = true, overrides = {}) => resolveRequest(response(ok ? { session: { ...session, version: 1, ...overrides } } : { error: 'Error de prueba' }, ok)),
   };
 };
+
+test('consent and Comenzar live below the steps, outside the initially hidden chat', async () => {
+  const html = await readFile(new URL('../bot/index.html', import.meta.url), 'utf8');
+  const intro = html.match(/<aside class="intro">([\s\S]*?)<\/aside>/)[1];
+  assert.match(intro, /id="step-report"[\s\S]*id="start-panel"[\s\S]*id="consent"[\s\S]*id="start"[^>]*>Comenzar/);
+  assert.match(html, /id="chat-card"[^>]* hidden>/);
+  assert.match(intro, /Este asistente usa OpenAI para procesar tu texto y transcribir tus audios\. Organiza tu relato; no realiza diagnósticos ni indica tratamientos\./);
+  assert.doesNotMatch(html, /La conversación queda disponible/);
+});
+
+test('chat opens only after consent and its second greeting arrives exactly two seconds later', async () => {
+  const messages = [{ role: 'assistant', text: 'Hola, bienvenido' }, { role: 'assistant', text: 'Podés mandar un audio' }];
+  const app = await setup({ autoStart: false, sessionOverrides: { messages } });
+  assert.equal(app.get('chat-card').hidden, true);
+  await app.get('start').handlers.click();
+  assert.equal(app.urls.includes('/api/bot/session'), false);
+  app.get('consent').checked = true;
+  app.get('consent').handlers.change();
+  assert.equal(app.get('start').disabled, false);
+  await app.get('start').handlers.click();
+  assert.equal(app.get('chat-card').hidden, false);
+  assert.equal(app.get('start-panel').hidden, true);
+  assert.equal(app.get('messages').children.length, 1);
+  assert.equal(app.get('record').disabled, true);
+  app.get('message').value = 'Mensaje anticipado';
+  await app.submit();
+  assert.equal(app.requests.length, 0);
+  app.tickWelcome(1999);
+  assert.equal(app.get('messages').children.length, 1);
+  app.tickWelcome(1);
+  assert.equal(app.get('messages').children.length, 2);
+  assert.equal(app.get('message').disabled, false);
+  assert.equal(app.get('record').disabled, false);
+  assert.equal(app.focused(), app.get('message'));
+  await app.get('start').handlers.click();
+  assert.equal(app.urls.filter(url => url.endsWith('/session')).length, 1);
+});
+
+test('leaving during the greeting cancels its delayed message and keeps the chat closed', async () => {
+  const app = await setup({ sessionOverrides: { messages: [{ role: 'assistant', text: 'Hola' }, { role: 'assistant', text: 'Audio' }] } });
+  app.windowHandlers.pagehide();
+  app.tickWelcome(2000);
+  assert.equal(app.get('chat-card').hidden, true);
+  assert.equal(app.get('messages').children.length, 0);
+});
+
+test('failed start keeps consent visible and chat hidden with a retryable error', async () => {
+  const app = await setup({ sessionFails: true });
+  assert.equal(app.get('chat-card').hidden, true);
+  assert.equal(app.get('start-panel').hidden, false);
+  assert.equal(app.get('start').disabled, false);
+  assert.equal(app.get('error').hidden, false);
+  assert.equal(app.get('error').textContent, 'No pudimos comenzar');
+});
 
 for (const status of ['complete', 'partial', 'urgent']) test('finished ' + status + ' result shows only readiness and download, without clinical summary', async () => {
   const data = { complaints: [{ reason: 'dolor', location: 'tobillo derecho', pain: 5 }], followups: [{ question: '¿Cambió tu rutina?', answer: 'Me cuesta caminar' }] };
@@ -149,7 +207,7 @@ test('each visit resets before starting and never restores a finished conversati
   assert.equal(app.get('composer').hidden, true);
   assert.equal(app.get('message').value, '');
   assert.equal(app.get('consent').checked, false);
-  assert.equal(app.get('messages').children.length, 2);
+  assert.equal(app.get('messages').children.length, 0);
   assert.ok(!JSON.stringify(app.get('messages').children).includes('Conversación anterior'));
 });
 test('a failed reset cannot expose or start an old conversation', async () => {

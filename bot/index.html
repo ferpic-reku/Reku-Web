@@ -14,7 +14,7 @@
     <header class="brand-header">
       <div class="brand-lockup"><img id="agreement-logo" hidden alt="" /><img id="reku-logo" src="/images/logo-reku.svg" alt="Reku" /></div>
     </header>
-    <section class="layout">
+    <section id="layout" class="layout awaiting-start">
       <aside class="intro">
         <span class="eyebrow">ANTES DE TU CONSULTA</span>
         <h1>El primer paso<br /> es escucharte.</h1>
@@ -24,18 +24,17 @@
           <div class="step" id="step-detail"><span>2</span><div><strong>Aclaramos lo necesario</strong><small>Sólo si falta algún detalle</small></div></div>
           <div class="step" id="step-report"><span>3</span><div><strong>Organizamos lo que nos contaste</strong><small>Y se lo hacemos llegar al profesional</small></div></div>
         </div>
+        <section id="start-panel" class="start-panel">
+          <p>Este asistente usa OpenAI para procesar tu texto y transcribir tus audios. Organiza tu relato; no realiza diagnósticos ni indica tratamientos.</p>
+          <label class="consent"><input id="consent" type="checkbox" /> <span>Acepto el procesamiento de mi relato y leí la <a href="/privacidad/" target="_blank" rel="noopener">política de privacidad</a>.</span></label>
+          <button id="start" class="primary" disabled>Comenzar <span aria-hidden="true">↗</span></button>
+        </section>
+        <p id="access-notice" class="result" role="status" hidden></p>
       </aside>
-      <section class="chat-card" aria-label="Entrevista sobre tu motivo de consulta">
+      <section id="chat-card" class="chat-card" aria-label="Entrevista sobre tu motivo de consulta" hidden>
         <div class="chat-header"><div class="assistant-avatar" aria-hidden="true">r<span>·</span></div><div><h2>Asistente Reku</h2><p id="chat-status">Te acompañamos antes de la consulta</p></div><span class="ai-label">IA</span></div>
         <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions"></div>
-        <p id="access-notice" class="result" role="status" hidden></p>
         <div id="typing" class="typing" hidden><span></span><span></span><span></span><p>Revisando lo que nos contás…</p></div>
-        <section id="start-panel" class="start-panel">
-          <p>Este asistente usa IA de OpenAI para procesar tu texto y transcribir tus audios. Organiza tu relato; no realiza diagnósticos ni indica tratamientos.</p>
-          <p>La conversación queda disponible en esta sesión por hasta 2 horas y puede perderse si se reinicia el servicio. Los audios se usan para transcribir y no se guardan en Reku.</p>
-          <label class="consent"><input id="consent" type="checkbox" /> <span>Acepto el procesamiento de mi relato y leí la <a href="/privacidad/" target="_blank" rel="noopener">política de privacidad</a>.</span></label>
-          <button id="start" class="primary" disabled>Empezar conversación <span aria-hidden="true">↗</span></button>
-        </section>
         <form id="composer" class="composer" hidden>
           <label class="sr-only" for="message">Tu mensaje</label>
           <textarea id="message" rows="2" maxlength="4000" placeholder="Tocá Grabar audio y contanos lo que te pasa, o escribilo acá. Lo que prefieras."></textarea>
@@ -57,9 +56,9 @@
           <h3 id="result-title">Tu informe está listo</h3>
           <button id="download" class="primary">Descargar informe PDF <span aria-hidden="true">↓</span></button>
         </div>
-        <p id="error" class="error" role="alert" hidden></p>
       </section>
     </section>
+    <p id="error" class="error" role="alert" hidden></p>
     <footer class="page-footer"><span id="brand-caption">Reku · Telerehabilitación con acompañamiento profesional</span><a href="/privacidad/" target="_blank" rel="noopener">Privacidad</a></footer>
   </main>
 </body>

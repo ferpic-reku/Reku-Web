@@ -16,10 +16,8 @@
   let available = false;
   let visitEnded = false;
   let accessMessage = '';
-  const welcome = [
-    'Hola, bienvenido a Reku. Necesitamos que nos cuentes el motivo de tu consulta: si es una lesión o una dolencia que venís arrastrando, cómo empezó, en qué zona, cuánto te duele del 1 al 10 y desde hace cuánto tiempo.',
-    'Podés escribirlo o, si te resulta más cómodo, mandar un audio.',
-  ];
+  let welcoming = false;
+  let welcomeTimer = null;
   const showError = (message = '') => { $('error').textContent = message; $('error').hidden = !message; };
   const api = async (path, body) => {
     const response = await fetch(`/api/bot/${path}`, {
@@ -35,12 +33,12 @@
     const recording = recorder?.state === 'recording';
     $('cancel-recording').hidden = !recording;
     $('send').hidden = Boolean(recording);
-    $('send').disabled = busy || recording || !$('message').value.trim();
-    $('message').disabled = (busy && !sendingMessage) || recording;
-    $('record').disabled = busy;
+    $('send').disabled = busy || welcoming || recording || !$('message').value.trim();
+    $('message').disabled = (busy && !sendingMessage) || welcoming || recording;
+    $('record').disabled = busy || welcoming;
     $('retry-audio').disabled = busy || recording;
     $('discard-audio').disabled = busy || recording;
-    $('start').disabled = busy || !available || !$('consent').checked;
+    $('start').disabled = busy || Boolean(session) || !available || !$('consent').checked;
     $('typing').hidden = !busy || !session;
   };
   const setBusy = (value) => { busy = value; updateControls(); };
@@ -68,7 +66,10 @@
     $('access-notice').hidden = !accessMessage;
     $('access-notice').textContent = accessMessage;
     $('messages').hidden = Boolean(accessMessage);
-    renderMessages(session?.messages || welcome.map(text => ({ role: 'assistant', text })));
+    $('chat-card').hidden = !session || Boolean(accessMessage);
+    $('layout').classList.toggle('awaiting-start', !session);
+    const messages = session?.messages || [];
+    renderMessages(welcoming ? messages.slice(0, 1) : messages);
     $('start-panel').hidden = Boolean(session) || Boolean(accessMessage);
     const done = session && session.status !== 'collecting';
     $('composer').hidden = !session || done;
@@ -87,11 +88,22 @@
   };
   $('consent').addEventListener('change', updateControls);
   $('start').addEventListener('click', async () => {
+    if (busy || session || !available || !$('consent').checked || visitEnded) return;
     setBusy(true); showError();
     try {
       const created = (await api('session', { consent: true })).session;
       if (visitEnded) { closeSession(created); return; }
-      session = created; render(); $('message').focus();
+      session = created;
+      welcoming = session.status === 'collecting' && session.messages.length > 1;
+      render();
+      $('chat-card').scrollIntoView({ block: 'start', behavior: 'smooth' });
+      if (welcoming) {
+        welcomeTimer = setTimeout(() => {
+          welcomeTimer = null;
+          if (visitEnded || session !== created) return;
+          welcoming = false; render(); $('message').focus();
+        }, 2000);
+      } else { $('message').focus(); }
     }
     catch (error) { showError(error.message); }
     finally { setBusy(false); }
@@ -126,7 +138,7 @@
   $('composer').addEventListener('submit', async (event) => {
     event.preventDefault();
     const text = $('message').value.trim();
-    if (!text || busy || !session) return;
+    if (!text || busy || welcoming || !session) return;
     await sendMessage(text);
   });
   const sendAudio = async () => {
@@ -165,7 +177,7 @@
   };
   $('record').addEventListener('click', async () => {
     if (recorder?.state === 'recording') { stopRecording(); return; }
-    if (busy) return;
+    if (busy || welcoming || !session) return;
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { showError('Este navegador no permite grabar. Podés escribir tu mensaje.'); return; }
     showError(); $('record').disabled = true;
     try {
@@ -234,6 +246,7 @@
   };
   window.addEventListener('pagehide', () => {
     visitEnded = true;
+    clearTimeout(welcomeTimer); welcomeTimer = null; welcoming = false;
     available = false;
     closeSession(session);
     stopRecording(true); clearAudio(); pendingMessage = null; session = null;
