@@ -42,10 +42,11 @@
           <div class="composer-tools">
             <div class="audio-actions">
               <button id="record" class="tool" type="button" title="Grabar audio" aria-label="Grabar audio"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg><span id="record-label">Grabar audio</span></button>
+              <button id="cancel-recording" class="text-button" type="button" hidden>Cancelar</button>
             </div>
             <button id="send" class="primary send" type="submit" disabled>Enviar <span aria-hidden="true">↑</span></button>
           </div>
-          <div id="recording-note" class="recording-note" hidden>Grabando <strong id="timer">0:00</strong> · Tocá Enviar para transcribir y enviar tu audio. Al llegar a 4 minutos se envía automáticamente lo grabado. <button id="cancel-recording" type="button">Cancelar</button></div>
+          <div id="recording-note" class="recording-note" hidden>Grabando <strong id="timer">0:00</strong> · Tocá Enviar para transcribir y enviar tu audio. Al llegar a 4 minutos se envía automáticamente lo grabado.</div>
           <div id="audio-retry" class="audio-review" hidden><button id="retry-audio" type="button" class="text-button">Reintentar envío del audio</button> · <button id="discard-audio" type="button" class="text-button">Descartar audio</button></div>
           <small class="composer-hint">Enter para enviar · Shift + Enter para una nueva línea</small>
         </form>

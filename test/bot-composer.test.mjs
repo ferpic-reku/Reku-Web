@@ -11,6 +11,15 @@ test('audio button stays light green before recording and when ready to send', a
   assert.match(css, /#record:not\(:disabled\):hover\{background:#cdebd9\}/);
 });
 
+test('recording cancellation sits beside audio send and the textbox cannot be resized', async () => {
+  const html = await readFile(new URL('../bot/index.html', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../bot/styles.css', import.meta.url), 'utf8');
+  const actions = html.match(/<div class="audio-actions">([\s\S]*?)<\/div>/)[1];
+  assert.match(actions, /id="record"[\s\S]*id="cancel-recording"/);
+  assert.match(css, /#message\{resize:none\}/);
+  assert.equal((html.match(/id="cancel-recording"/g) || []).length, 1);
+});
+
 const setup = async ({ audioLevel = 0.02, search = '', hash = '', sessionOverrides = {}, autoStart = true, resetFails = false, transcription = 'Me duele la rodilla derecha', transcriptionFailures = 0, access = { allowed: true } } = {}) => {
   let focused;
   const element = tagName => ({
@@ -225,11 +234,14 @@ test('recording sends its transcription directly without changing the typed draf
   const app = await setup();
   const input = app.get('message');
   input.value = 'Borrador que todavía no envié';
+  assert.equal(app.get('cancel-recording').hidden, true);
   await app.get('record').handlers.click();
   assert.equal(app.get('record-label').textContent, 'Enviar');
+  assert.equal(app.get('cancel-recording').hidden, false);
   app.sampleAudio();
   await app.get('record').handlers.click();
   await new Promise(resolve => setImmediate(resolve));
+  assert.equal(app.get('cancel-recording').hidden, true);
   assert.equal(app.audioRequests.length, 1);
   assert.equal(app.requests.length, 1);
   assert.equal(app.requests[0].text, 'Me duele la rodilla derecha');
