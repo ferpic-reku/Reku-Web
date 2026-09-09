@@ -81,6 +81,16 @@ test("extraction rejects fields without literal patient evidence and disables pr
 test("audio rejects unsupported types before contacting the provider", async () => {
   await assert.rejects(transcribeConsultation({ mimeType: "text/plain", buffer: Buffer.from("hello") }), /BOT_AUDIO_TYPE/);
 });
+test("long audio transcripts are preserved up to 12000 characters and message transport accepts them", async () => {
+  const text = 'Relato de prueba. '.repeat(300).trim();
+  const result = await transcribeConsultation({ mimeType: 'audio/webm', buffer: Buffer.from('fake-audio') }, {
+    settings: { apiKey: 'test', transcriptionModel: 'test' }, fetchImpl: async () => ({ ok: true, json: async () => ({ text }) }),
+  });
+  assert.equal(result, text);
+  const source = await readFile(new URL('../src/consultation-bot.mjs', import.meta.url), 'utf8');
+  assert.match(source, /readBody\(request, 80_000\)/);
+  assert.match(source, /text\.length > 12000/);
+});
 test("evidence repair identifies the exact invalid field instead of making the patient repeat it", async () => {
   const requests = [];
   const data = complete();

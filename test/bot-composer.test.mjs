@@ -11,7 +11,7 @@ test('audio button stays light green before recording and when ready to send', a
   assert.match(css, /#record:not\(:disabled\):hover\{background:#cdebd9\}/);
 });
 
-const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {}, autoStart = true, resetFails = false } = {}) => {
+const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {}, autoStart = true, resetFails = false, transcription = 'Me duele la rodilla derecha', transcriptionFailures = 0 } = {}) => {
   let focused;
   const element = tagName => ({
     tagName, children: [],
@@ -36,6 +36,7 @@ const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {}, au
   let reloads = 0;
   const timers = new Map();
   let timerId = 0;
+  let now = 0;
   class AudioContext {
     async resume() {}
     async close() {}
@@ -58,7 +59,7 @@ const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {}, au
     document: { getElementById: get, createElement: element, createTextNode: text => text, body: element() },
     location: { search, reload: () => reloads++ }, window: { addEventListener: (event, fn) => { windowHandlers[event] = fn; }, AudioContext, MediaRecorder },
     navigator: { sendBeacon: (url, body) => { beacons.push({ url, body }); return true; }, mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } },
-    MediaRecorder, File, Blob,
+    MediaRecorder, File, Blob, Date: { now: () => now },
     console: { info: (...args) => diagnostics.push(args) },
     setInterval: (callback, ms) => { timers.set(++timerId, { callback, ms }); return timerId; },
     clearInterval: id => timers.delete(id),
@@ -70,7 +71,8 @@ const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {}, au
       if (url.endsWith('/session')) { assert.equal(options.method, 'POST', 'Never restore a previous session'); return response({ session }); }
       if (url.endsWith('/transcribe')) {
         audioRequests.push(options.body);
-        return response({ text: 'Me duele la rodilla derecha' });
+        if (transcriptionFailures-- > 0) return response({ error: 'Error temporal' }, false);
+        return response({ text: transcription });
       }
       requests.push(JSON.parse(options.body));
       return new Promise(resolve => { resolveRequest = resolve; });
@@ -83,6 +85,7 @@ const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {}, au
   return {
     get, submit, requests, urls, audioRequests, diagnostics, windowHandlers, beacons, reloads: () => reloads, focused: () => focused,
     sampleAudio: () => { for (const timer of timers.values()) if (timer.ms === 50) for (let i = 0; i < 6; i++) timer.callback(); },
+    tickRecording: ms => { now += ms; for (const timer of timers.values()) if (timer.ms === 500) timer.callback(); },
     finish: (ok = true, overrides = {}) => resolveRequest(response(ok ? { session: { ...session, version: 1, ...overrides } } : { error: 'Error de prueba' }, ok)),
   };
 };
@@ -217,6 +220,44 @@ test('recording sends its transcription directly without changing the typed draf
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(app.get('audio-retry').hidden, true);
   assert.equal(input.value, 'Borrador que todavía no envié');
+});
+
+test('four-minute limit sends the captured audio and its full long transcription exactly once', async () => {
+  const transcription = 'Relato de prueba. '.repeat(300);
+  const app = await setup({ transcription });
+  await app.get('record').handlers.click();
+  app.sampleAudio();
+  app.tickRecording(239000);
+  assert.equal(app.get('timer').textContent, '3:59');
+  assert.equal(app.audioRequests.length, 0);
+  app.tickRecording(1000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(app.audioRequests.length, 1);
+  assert.equal(await app.audioRequests[0].get('audio').text(), 'fake-audio');
+  assert.equal(app.requests[0].text, transcription.trim());
+  assert.equal(app.get('message').value, '');
+  app.tickRecording(10000);
+  assert.equal(app.audioRequests.length, 1);
+  app.finish();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(app.get('audio-retry').hidden, true);
+});
+
+test('automatic cutoff preserves audio for retry if transcription fails', async () => {
+  const app = await setup({ transcriptionFailures: 1 });
+  await app.get('record').handlers.click();
+  app.sampleAudio();
+  app.tickRecording(240000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(app.get('audio-retry').hidden, false);
+  assert.equal(app.requests.length, 0);
+  const retry = app.get('retry-audio').handlers.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(await app.audioRequests[1].get('audio').arrayBuffer(), await app.audioRequests[0].get('audio').arrayBuffer());
+  assert.equal(app.requests.length, 1);
+  app.finish();
+  await retry;
+  assert.equal(app.get('audio-retry').hidden, true);
 });
 
 test('silent recordings do not call transcription or send a message', async () => {

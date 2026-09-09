@@ -136,7 +136,7 @@
         const form = new FormData(); form.append('audio', audio.file, audio.file.name || 'consulta.webm');
         const result = await api('transcribe', form);
         const text = typeof result.text === 'string' ? result.text.trim() : '';
-        if (!text || text.length > 4000) throw new Error('No pudimos entender el audio. Probá grabar nuevamente.');
+        if (!text || text.length > 12000) throw new Error('No pudimos entender el audio. Probá grabar nuevamente.');
         audio.text = text;
       }
       if (visitEnded) return;
@@ -180,7 +180,7 @@
         if (rms > 0.008) audibleSamples++;
       }, 50);
       const type = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find(t => MediaRecorder.isTypeSupported(t));
-      recorder = new MediaRecorder(stream, type ? { mimeType: type } : {});
+      recorder = new MediaRecorder(stream, { audioBitsPerSecond: 64000, ...(type ? { mimeType: type } : {}) });
       const chunks = []; discardRecording = false;
       recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
       recorder.onstop = async () => {
@@ -199,7 +199,7 @@
       recordTimer = setInterval(() => {
         const seconds = Math.floor((Date.now() - startedAt) / 1000);
         $('timer').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-        if (seconds >= 120) stopRecording();
+        if (seconds >= 240) stopRecording();
       }, 500);
       $('recording-note').hidden = false; $('record-label').textContent = 'Enviar'; $('record').classList.add('recording');
       $('record').setAttribute('aria-label', 'Enviar audio');

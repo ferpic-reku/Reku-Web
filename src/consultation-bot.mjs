@@ -128,14 +128,14 @@ export const handleConsultationBot = async (request, response, url) => {
     session.busy = true;
     try {
       if (action === "message") {
-        const body = JSON.parse(await readBody(request, 20_000));
+        const body = JSON.parse(await readBody(request, 80_000));
         if (body.instanceId !== session.instanceId) throw fail("Se inició otra conversación. Recargá la página para continuar.", 409);
         if (typeof body.requestId !== "string" || !/^[\w-]{10,80}$/.test(body.requestId)) throw fail("Mensaje inválido.");
         if (body.requestId === session.lastRequestId) { sendJson(response, 200, { session: present(session) }); return; }
         if (body.version !== session.version) throw fail("La conversación cambió en otra ventana. Recargá para continuar.", 409);
         if (session.status !== "collecting") throw fail("La entrevista ya finalizó. Podés comenzar una nueva para corregir el relato.", 409);
         const text = typeof body.text === "string" ? body.text.trim() : "";
-        if (!text || text.length > 4000) throw fail("Escribí un mensaje de hasta 4000 caracteres.");
+        if (!text || text.length > 12000) throw fail("El mensaje puede tener hasta 12000 caracteres.");
         await enforceAIQuota(request);
         const messages = [...session.messages, { role: "user", text }];
         const diagnostics = [];

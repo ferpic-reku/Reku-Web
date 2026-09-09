@@ -16,6 +16,8 @@ La primera descarga genera el párrafo con la conversación y los datos verifica
 
 ## Continuidad
 
+Los audios admiten hasta cuatro minutos: al alcanzar el límite se detiene la captura y se transcribe/envía automáticamente lo grabado, sin descartarlo. Se solicita codificación a 64 kbps y se mantiene el máximo de 8 MB. La transcripción y el envío aceptan hasta 12.000 caracteres para no rechazar relatos largos por el límite previo de 4.000; el campo de escritura manual conserva su límite. Ante fallos de transcripción o envío se conserva el audio en memoria para reintentar durante la misma visita, sin guardarlo entre sesiones.
+
 «Cómo comenzó» conserva la acción y la actividad/circunstancia relatadas (por ejemplo, «Torcedura jugando al fútbol»), sin reducirlas a una categoría ni confundirlas con la actividad que agrava el dolor hoy. `mechanismClear` distingue una etiqueta aislada de una explicación suficiente. Si falta contexto se pregunta brevemente cómo ocurrió; si ya fue aportado no se repregunta. No se exigen detalles biomecánicos: una respuesta a la aclaración, el inicio gradual, la causa desconocida o una negativa explícita permiten continuar. El ensayo opt-in `node --env-file=.env scripts/eval-consultation-mechanism.mjs` valida extracción y continuidad con relatos ficticios.
 
 El servidor conserva los datos verificados de cada molestia con un identificador estable (`c1`, `c2`, etc.) y la última pregunta, su campo y su molestia. Una omisión en la extracción siguiente no borra lo ya confirmado. Las correcciones necesitan evidencia literal del mensaje actual. Las respuestas breves se interpretan contra la última pregunta, no contra el orden de las molestias que devuelva el modelo.

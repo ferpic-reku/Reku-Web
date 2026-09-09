@@ -193,6 +193,6 @@ export const transcribeConsultation = async (file, { fetchImpl = fetch, settings
   if (!response.ok) throw new Error(`BOT_AUDIO_PROVIDER_${response.status}`);
   const body = await response.json();
   const text = String(body.text || "").trim();
-  if (!text || text.length > 4000) throw new Error("BOT_AUDIO_UNCLEAR");
+  if (!text || text.length > 12000) throw new Error("BOT_AUDIO_UNCLEAR");
   return text;
 };
