@@ -16,6 +16,7 @@ test('intro invites a detailed account and steps remain informational without pr
 test('audio button stays light green before recording and when ready to send', async () => {
   const css = await readFile(new URL('../bot/styles.css', import.meta.url), 'utf8');
   assert.match(css, /#record\{[^}]*background:#e0f3e8;[^}]*color:#236747;/);
+  assert.match(css, /#record\{[^}]*width:132px;flex-shrink:0/);
   assert.match(css, /#record\.recording\{background:#e0f3e8;color:#236747\}/);
   assert.match(css, /#record:not\(:disabled\):hover\{background:#cdebd9\}/);
 });

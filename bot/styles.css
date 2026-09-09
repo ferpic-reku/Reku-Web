@@ -3,7 +3,7 @@
 #message{resize:none}
 .recording-help{margin-top:6px;color:var(--muted)}
 #cancel-recording{margin-left:8px;align-self:center;min-height:42px;color:var(--muted);font-size:11px}
-#record{background:#e0f3e8;color:#236747;border:1px solid #b8dfc9;border-radius:10px;padding:10px 12px}
+#record{background:#e0f3e8;color:#236747;border:1px solid #b8dfc9;border-radius:10px;padding:10px 12px;width:132px;flex-shrink:0}
 #record:not(:disabled):hover{background:#cdebd9}
 #record.recording{background:#e0f3e8;color:#236747}
 #record.recording:not(:disabled):hover{background:#cdebd9}
