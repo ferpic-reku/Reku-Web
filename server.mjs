@@ -5,6 +5,7 @@ import {
   validatePublicAgreementRoute,
 } from "./src/admin-api.mjs";
 import { handleBookingApi } from "./src/booking-api.mjs";
+import { handleConsultationBot } from "./src/consultation-bot.mjs";
 import {
   cleanupAgreementApiIdempotency,
   handleAgreementApi,
@@ -54,6 +55,9 @@ const calendarCleanupTimer = setInterval(runCalendarMaintenance, 5 * 60 * 1000);
 calendarCleanupTimer.unref();
 
 const isAgreementHostPath = (pathname) =>
+  pathname === "/bot" ||
+  pathname.startsWith("/bot/") ||
+  pathname.startsWith("/api/bot/") ||
   pathname === "/" ||
   pathname === "/turnos" ||
   pathname.startsWith("/turnos/") ||
@@ -176,6 +180,11 @@ const server = createServer(async (request, response) => {
       if (!handled) {
         sendJson(response, 404, { error: "Endpoint no encontrado." });
       }
+      return;
+    }
+
+    if (pathname.startsWith("/api/bot/")) {
+      await handleConsultationBot(request, response, requestUrl);
       return;
     }
 

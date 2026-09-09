@@ -197,6 +197,11 @@ const publicFiles = new Map(
 
 const publicMounts = [
   {
+    prefix: "/bot/",
+    directory: join(root, "bot"),
+    extensions: new Set([".html", ".css", ".js"]),
+  },
+  {
     prefix: "/images/",
     directory: join(root, "images"),
     extensions: new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]),
@@ -265,6 +270,7 @@ const publicUploadFolders = new Map([
 ]);
 
 export const resolveStaticRequestPath = (pathname) => {
+  if (pathname === "/bot" || pathname === "/bot/") return "/bot/index.html";
   if (pathname === "/") return "/index.html";
 
   if (pathname === "/privacidad" || pathname === "/privacidad/") {
@@ -438,6 +444,7 @@ export const serveStatic = async (
 
   try {
     const isPrivateRoute =
+      pathname.startsWith("/bot/") ||
       pathname.startsWith("/admin") ||
       pathname.startsWith("/profesional") ||
       pathname.startsWith("/profesional-turnos");
@@ -447,7 +454,9 @@ export const serveStatic = async (
     const allowsSameOriginFrame =
       !isAgreementPreview && pathname.startsWith("/turnos");
     const allowsAgreementPreview = pathname.startsWith("/admin") && isHtml;
-    const extraHeaders = isAgreementPreview
+    const extraHeaders = pathname.startsWith("/bot/")
+      ? { "Permissions-Policy": "camera=(), microphone=(self), geolocation=(), payment=(), usb=()", "Content-Security-Policy": `${securityHeaders["Content-Security-Policy"]}; media-src 'self' blob:` }
+      : isAgreementPreview
       ? agreementPreviewHeaders
       : allowsSameOriginFrame
         ? sameOriginFrameHeaders

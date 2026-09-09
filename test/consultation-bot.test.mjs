@@ -1,0 +1,74 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { analyzeConsultation, nextConsultationStep, transcribeConsultation } from "../src/consultation-bot-ai.mjs";
+import { requireBotOrigin } from "../src/consultation-bot.mjs";
+import { serveStatic } from "../src/http.mjs";
+import { renderConsultationReport } from "../src/consultation-bot-report.mjs";
+
+const complete = () => ({
+  complaints: [{ reason: "dolor de rodilla", location: "rodilla", locationClear: true, sideRequired: true, side: "derecha", onset: "hace dos semanas", mechanism: "torsión jugando fútbol", pain: 4, painNote: null, limitations: null }],
+  priorCare: null, goal: null, contextAnswered: false, urgent: false, urgentReason: null,
+});
+test("a complete account ends immediately without asking optional questions", () => {
+  assert.equal(nextConsultationStep(complete()).complete, true);
+});
+test("only missing essentials are asked, and central areas do not require a side", () => {
+  const data = complete(); data.complaints[0].side = null;
+  assert.equal(nextConsultationStep(data).key, "0.side");
+  data.complaints[0].sideRequired = false;
+  assert.equal(nextConsultationStep(data).complete, true);
+  data.complaints[0].pain = null;
+  assert.equal(nextConsultationStep(data).key, "0.pain");
+  data.complaints[0].painNote = "No informado: no sabe cuantificar";
+  assert.equal(nextConsultationStep(data).complete, true);
+});
+test("unclear areas and separate complaints preserve their missing detail", () => {
+  const data = complete(); data.complaints.push({ ...data.complaints[0], location: "brazo", locationClear: false });
+  assert.equal(nextConsultationStep(data).key, "1.detail");
+});
+test("urgent symptoms interrupt the regular questionnaire", () => {
+  const data = complete(); data.urgent = true; data.complaints[0].onset = null;
+  const next = nextConsultationStep(data);
+  assert.equal(next.urgent, true);
+  assert.equal(next.complete, false);
+  assert.match(next.text, /presencial urgente/);
+});
+test("extraction rejects fields without literal patient evidence and disables provider storage", async () => {
+  const data = complete();
+  data.complaints[0].evidence = { reason: "rodilla", location: "rodilla", side: "derecha", onset: "dos semanas", mechanism: "me torcí", pain: "4", limitations: null };
+  let request;
+  const result = await analyzeConsultation([{ role: "user", text: "Me duele la rodilla hace dos semanas" }, { role: "assistant", text: "¿Es la derecha?" }], {
+    settings: { apiKey: "test", model: "test" },
+    fetchImpl: async (_url, options) => {
+      request = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ status: "completed", output: [{ content: [{ type: "output_text", text: JSON.stringify(data) }] }] }) };
+    },
+  });
+  assert.equal(request.store, false);
+  assert.equal(result.complaints[0].side, null);
+  assert.equal(result.complaints[0].pain, null);
+  assert.equal(result.complaints[0].mechanism, null);
+  assert.equal(result.complaints[0].onset, "hace dos semanas");
+});
+test("audio rejects unsupported types before contacting the provider", async () => {
+  await assert.rejects(transcribeConsultation({ mimeType: "text/plain", buffer: Buffer.from("hello") }), /BOT_AUDIO_TYPE/);
+});
+test("bot mutations reject missing and foreign origins", () => {
+  assert.throws(() => requireBotOrigin({ headers: { host: "www.reku.io" } }), /Recargá/);
+  assert.throws(() => requireBotOrigin({ headers: { host: "www.reku.io", origin: "https://evil.test" } }), /Origen/);
+  assert.doesNotThrow(() => requireBotOrigin({ headers: { host: "www.reku.io", origin: "https://www.reku.io" } }));
+});
+test("microphone permission is enabled only for bot pages", async () => {
+  for (const path of ["/bot/index.html", "/turnos/index.html"]) {
+    let headers;
+    await serveStatic({ method: "HEAD" }, { writeHead: (_code, value) => { headers = value; }, end() {} }, path);
+    assert.ok(headers["Permissions-Policy"].includes(path.startsWith("/bot/") ? "microphone=(self)" : "microphone=()"));
+    if (path.startsWith("/bot/")) { assert.equal(headers["Cache-Control"], "no-store"); assert.match(headers["X-Robots-Tag"], /noindex/); }
+  }
+});
+test("the report includes a real PDF with no required patient identity", async () => {
+  const pdf = await renderConsultationReport({ data: complete(), brand: { name: "Reku" }, updatedAt: Date.now(), status: "complete" });
+  assert.equal(pdf.subarray(0, 5).toString(), "%PDF-");
+  assert.ok(pdf.length > 3000);
+  assert.match(pdf.toString("latin1"), /\/Type \/Pages\s+\/Count 1\b/);
+});
