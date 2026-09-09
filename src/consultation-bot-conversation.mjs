@@ -12,10 +12,33 @@ const expressesUncertainty = value => /\b(?:no (?:lo )?(?:recuerdo|se|sé|me acu
 // A missing model field is not a withdrawal of a previously verified fact.
 // Stable ids prevent extraction order from moving answers between complaints.
 export function mergeConsultationData(previous, extracted, latestText, lastQuestion) {
-  const complaints = structuredClone(previous?.complaints || []);
+  let complaints = structuredClone(previous?.complaints || []);
+  const retired = new Set(previous?.retiredComplaintIds || []);
+  const invalidatedFields = structuredClone(previous?.invalidatedFields || {});
+  const corrections = (extracted.corrections || []).filter(correction => complaints.some(item => item.id === correction.complaintId)
+    && ["complaint", ...fields].includes(correction.field) && quotedIn(correction.evidence, latestText));
+  for (const correction of corrections) {
+    const item = complaints.find(item => item.id === correction.complaintId);
+    if (!item) continue;
+    if (correction.field === "complaint") {
+      retired.add(item.id);
+      complaints = complaints.filter(other => other.id !== item.id);
+      continue;
+    }
+    // A revised location invalidates anatomical wording/laterality, not the
+    // patient's independently established timing or pain for the same complaint.
+    const cleared = correction.field === "location" ? ["location", "reason", "side"] : [correction.field];
+    invalidatedFields[item.id] = [...new Set([...(invalidatedFields[item.id] || []), ...cleared])];
+    for (const field of cleared) { item[field] = null; item.evidence = { ...item.evidence, [field]: null }; }
+    if (cleared.includes("location")) { item.locationClear = false; item.sideRequired = false; }
+    if (cleared.includes("pain")) item.painNote = null;
+    if (cleared.includes("mechanism")) item.mechanismClear = false;
+  }
+  let nextId = Math.max(0, ...[...(previous?.complaints || []).map(item => item.id), ...retired].map(id => Number(/^c(\d+)$/.exec(id)?.[1]) || 0)) + 1;
   const seen = new Set();
   const currentMechanisms = new Set();
   for (const raw of extracted.complaints) {
+    if (retired.has(raw.id)) continue;
     const incoming = unknownMechanism(raw.mechanism) && !expressesUncertainty(raw.evidence?.mechanism)
       ? { ...raw, mechanism: null, mechanismClear: false } : raw;
     let item = complaints.find(existing => incoming.id && existing.id === incoming.id);
@@ -23,7 +46,10 @@ export function mergeConsultationData(previous, extracted, latestText, lastQuest
     if (!item) item = complaints.find(existing => normalize(existing.location) === normalize(incoming.location) && normalize(existing.side) === normalize(incoming.side));
     if (!item) {
       if (complaints.length >= 5) continue;
-      item = { ...incoming, id: `c${complaints.length + 1}` };
+      // Historical wording alone must not resurrect a retracted complaint
+      // under a new id. New symptoms need evidence in this turn.
+      if (previous && !["reason", "location"].some(field => quotedIn(incoming.evidence?.[field], latestText))) continue;
+      item = { ...incoming, id: `c${nextId++}` };
       complaints.push(item);
     }
     if (seen.has(item.id)) continue;
@@ -32,6 +58,7 @@ export function mergeConsultationData(previous, extracted, latestText, lastQuest
     item.evidence = { ...priorEvidence };
     for (const field of fields) {
       const quote = incoming.evidence?.[field];
+      if (invalidatedFields[item.id]?.includes(field) && !quotedIn(quote, latestText)) continue;
       if (incoming[field] == null) continue;
       // Bare numbers / yes / no belong only to the last question's target.
       if (/^(?:\d+(?:[.,]\d+)?|s[ií]|no)[.!\s]*$/i.test(latestText) && quotedIn(quote, latestText)
@@ -54,7 +81,7 @@ export function mergeConsultationData(previous, extracted, latestText, lastQuest
   }
   const answer = extracted.lastAnswer;
   const target = complaints.find(item => item.id === lastQuestion?.complaintId);
-  if (target && fields.concat("detail").includes(lastQuestion.field) && answer?.status === "answered"
+  if (!corrections.length && target && fields.concat("detail").includes(lastQuestion.field) && answer?.status === "answered"
     && typeof answer.value === "string" && quotedIn(answer.evidence, latestText)) {
     const field = lastQuestion.field === "detail" ? "location" : lastQuestion.field;
     if (field === "pain") {
@@ -74,10 +101,12 @@ export function mergeConsultationData(previous, extracted, latestText, lastQuest
     if (field !== "mechanism" || !currentMechanisms.has(target.id)) target.evidence = { ...target.evidence, [field]: answer.evidence };
   }
   return {
-    ...extracted, complaints,
+    ...extracted, complaints, corrections, retiredComplaintIds: [...retired], invalidatedFields,
     priorCare: extracted.priorCare || previous?.priorCare || null,
     goal: extracted.goal || previous?.goal || null,
-    followups: structuredClone(previous?.followups || []),
+    followups: structuredClone(previous?.followups || []).filter(item => !retired.has(item.complaintId)
+      && !corrections.some(correction => correction.complaintId === item.complaintId)),
+    followupCount: previous?.followupCount ?? previous?.followups?.length ?? 0,
   };
 }
 
@@ -86,31 +115,38 @@ export async function advanceConsultation(session, messages, { analyze = analyze
   const lastQuestion = session.lastQuestion;
   const extracted = await analyze(messages, { previousData: session.data, lastQuestion });
   const data = mergeConsultationData(session.data, extracted, latestText, lastQuestion);
-  if (lastQuestion?.field === "followup") {
+  const correcting = data.corrections.length > 0 || ["correction", "correction_unclear"].includes(extracted.lastAnswer?.status);
+  if (!data.urgent && extracted.lastAnswer?.status === "correction_unclear") {
+    return { data, next: { key: "correction", field: "correction", text: "Perdón, puede que te haya entendido mal. ¿Qué dato querés corregir y cómo es en realidad?" } };
+  }
+  if (!data.urgent && !correcting && lastQuestion?.field === "correction" && ["unclear", "unrelated"].includes(extracted.lastAnswer?.status)) {
+    return { data, next: { ...lastQuestion, text: "Todavía no me quedó claro qué entendí mal. ¿Podés decirme qué dato hay que cambiar y cuál sería el correcto?" } };
+  }
+  if (!data.urgent && !correcting && lastQuestion?.field === "followup" && ["unclear", "unrelated"].includes(extracted.lastAnswer?.status)) {
+    return { data, next: { ...lastQuestion, text: `No me quedó clara tu respuesta. ${lastQuestion.text} Si no lo sabés o preferís no responder, podés decirlo.` } };
+  }
+  if (!correcting && lastQuestion?.field === "followup") {
     const entry = data.followups[lastQuestion.followupIndex];
     if (entry && entry.answer === null) entry.answer = latestText; // Verbatim, never an inferred diagnosis.
   }
-  // One short clarification instead of repeating the same compound question.
-  // After a second unclear answer preserve uncertainty for clinician review.
-  if (!data.urgent && lastQuestion?.complaintId && lastQuestion.field !== "followup" && extracted.lastAnswer?.status === "unclear") {
+  // Ambiguity is not a refusal: clarify without inventing an answer or marking
+  // the field complete. Only an explicit unknown/refusal can close it.
+  if (!data.urgent && !correcting && lastQuestion?.complaintId && lastQuestion.field !== "followup" && extracted.lastAnswer?.status === "unclear") {
     const item = data.complaints.find(item => item.id === lastQuestion.complaintId);
-    if (item && lastQuestion.clarification) {
-      const value = "No informado: respuesta ambigua; revisar con el profesional";
-      if (lastQuestion.field === "pain") { item.pain = null; item.painNote = value; }
-      else if (lastQuestion.field === "detail") { item.locationClear = true; item.location = `${item.location || "Zona no precisada"} (detalle no aclarado)`; }
-      else item[lastQuestion.field] = value;
-    } else if (item) {
+    if (item) {
       const text = lastQuestion.field === "mechanism"
-        ? `Para no interpretar de más: ¿querés decir que no recordás qué inició la molestia en ${item.location}?`
-        : `Para dejarlo claro para el profesional: ${lastQuestion.text} Si no lo sabés, podés decirlo.`;
+        ? "No me quedó claro cómo empezó. ¿Podés contármelo de otra forma? Si no lo recordás, podés decirlo."
+        : `No me quedó clara tu respuesta. ${lastQuestion.text} También podés corregirme si entendí mal o decir que no lo sabés.`;
       return { data, next: { ...lastQuestion, text, clarification: true } };
     }
   }
   const next = nextConsultationStep(data);
-  if (!next.complete || session.version >= 24 || data.followups.length >= MAX_CONSULTATION_FOLLOWUPS) return { data, next };
+  if (correcting && !data.urgent) next.text = `Gracias por aclararlo. ${next.text}`;
+  if (!next.complete || session.version >= 24 || data.followupCount >= MAX_CONSULTATION_FOLLOWUPS) return { data, next };
   const followup = await chooseFollowup(data, messages, { onDecision: onFollowupDecision });
   if (!followup) return { data, next };
   data.followups.push(followup);
-  return { data, next: { key: `followup.${data.followups.length}`, field: "followup", complaintId: followup.complaintId,
+  data.followupCount++;
+  return { data, next: { key: `followup.${data.followupCount}`, field: "followup", complaintId: followup.complaintId,
     followupIndex: data.followups.length - 1, text: followup.question } };
 }

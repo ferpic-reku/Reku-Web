@@ -93,17 +93,21 @@ test("an explicit unknown cause or refusal stays unknown without changing other 
     assert.equal(data.complaints[1].mechanism, "jugando al fútbol");
   }
 });
-test("screenshot sequence clarifies ambiguous no once, then continues without repeating onset or mechanism", async () => {
+test("ambiguity pauses until the patient clarifies or explicitly cannot answer", async () => {
   const session = { data: state([complaint("c1", { mechanism: null }), complaint("c2", { location: "espalda baja", pain: null })]), version: 2,
     lastQuestion: { complaintId: "c1", field: "mechanism", key: "c1.mechanism", text: "¿Hubo golpe, esfuerzo, apareció de a poco o no recordás?" } };
   const unclear = async () => ({ ...state([]), lastAnswer: { status: "unclear", value: null, evidence: "no" } });
   let turn = await advanceConsultation(session, msgs("no"), { analyze: unclear });
   assert.equal(turn.next.clarification, true);
-  assert.match(turn.next.text, /no recordás/);
+  assert.match(turn.next.text, /No me quedó claro/);
   assert.notEqual(turn.next.text, session.lastQuestion.text);
   turn = await advanceConsultation({ ...session, data: turn.data, lastQuestion: turn.next }, msgs("no"), { analyze: unclear });
+  assert.equal(turn.next.field, "mechanism");
+  assert.equal(turn.data.complaints[0].mechanism, null);
+  turn = await advanceConsultation({ ...session, data: turn.data, lastQuestion: turn.next }, msgs("No recuerdo"), {
+    analyze: async () => ({ ...state([]), lastAnswer: { status: "answered", value: "No informado: no recuerda", evidence: "No recuerdo" } }),
+  });
   assert.equal(turn.next.key, "c2.pain");
-  assert.match(turn.data.complaints[0].mechanism, /respuesta ambigua/);
   turn = await advanceConsultation({ ...session, data: turn.data, lastQuestion: turn.next }, msgs("3"), {
     analyze: async () => ({ ...state([]), lastAnswer: { status: "answered", value: "3", evidence: "3" } }), chooseFollowup: async () => null,
   });
