@@ -11,6 +11,11 @@ export const loadBotBrandLogo = async (brand) => {
   return path ? sharp(path).trim().resize({ width: 400, height: 160, fit: "inside" }).png().toBuffer().catch(() => null) : null;
 };
 
+export const formatConsultationReportValue = (value) => {
+  const text = String(value ?? "").trim() || "No informado";
+  return text.charAt(0).toLocaleUpperCase("es-AR") + text.slice(1);
+};
+
 export const consultationReportRows = (data) => (data?.complaints || []).map((item) => [
   ["Motivo", item.reason],
   ["Zona / detalle", item.location],
@@ -41,7 +46,7 @@ export const renderConsultationReport = async (session, { narrative = fallbackCo
     doc.moveDown(0.7);
   };
   const row = (label, value) => {
-    const text = String(value || "No informado");
+    const text = formatConsultationReportValue(value);
     doc.font("Helvetica").fontSize(10);
     const valueHeight = doc.heightOfString(text, { width: 315 });
     doc.font("Helvetica-Bold").fontSize(9);

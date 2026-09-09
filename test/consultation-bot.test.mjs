@@ -3,7 +3,18 @@ import test from "node:test";
 import { analyzeConsultation, nextConsultationStep, transcribeConsultation } from "../src/consultation-bot-ai.mjs";
 import { requireBotOrigin, resolveBotBrand } from "../src/consultation-bot.mjs";
 import { serveStatic } from "../src/http.mjs";
-import { renderConsultationReport } from "../src/consultation-bot-report.mjs";
+import { renderConsultationReport, formatConsultationReportValue } from "../src/consultation-bot-report.mjs";
+
+test("PDF values capitalize only their initial character without changing numbers or remaining text", () => {
+  for (const [value, expected] of [
+    ["torcedura jugando al fútbol", "Torcedura jugando al fútbol"],
+    ["tobillo", "Tobillo"], ["izquierdo", "Izquierdo"],
+    ["hace dos meses", "Hace dos meses"], ["dolor al caminar", "Dolor al caminar"],
+    ["  área lumbar  ", "Área lumbar"], ["consulta con ART", "Consulta con ART"],
+    ["YPF", "YPF"], ["5/10", "5/10"], ["2 meses", "2 meses"],
+    [0, "0"], [null, "No informado"], [" ", "No informado"],
+  ]) assert.equal(formatConsultationReportValue(value), expected);
+});
 
 const complete = () => ({
   complaints: [{ reason: "dolor de rodilla", location: "rodilla", locationClear: true, sideRequired: true, side: "derecha", onset: "hace dos semanas", mechanism: "torsión jugando fútbol", pain: 4, painNote: null, limitations: null }],
