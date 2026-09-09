@@ -12,6 +12,16 @@ const complete = () => ({
 test("a complete account ends immediately without asking optional questions", () => {
   assert.equal(nextConsultationStep(complete()).complete, true);
 });
+test("an injury label alone requires its circumstances, but a known or declined cause does not", () => {
+  const data = complete();
+  Object.assign(data.complaints[0], { mechanism: "torcedura", mechanismClear: false });
+  assert.equal(nextConsultationStep(data).key, "0.mechanism");
+  assert.match(nextConsultationStep(data).text, /Qué estabas haciendo/);
+  Object.assign(data.complaints[0], { mechanism: "Torcedura jugando al fútbol", mechanismClear: true });
+  assert.equal(nextConsultationStep(data).complete, true);
+  Object.assign(data.complaints[0], { mechanism: "No informado: no recuerda", mechanismClear: false });
+  assert.equal(nextConsultationStep(data).complete, true);
+});
 test("only missing essentials are asked, and central areas do not require a side", () => {
   const data = complete(); data.complaints[0].side = null;
   assert.equal(nextConsultationStep(data).key, "0.side");

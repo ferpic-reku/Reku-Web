@@ -40,6 +40,31 @@ test("unverified lastAnswer cannot inject an answer", () => {
   const data = mergeConsultationData(state(), extracted, "3", { field: "pain", complaintId: "c1" });
   assert.equal(data.complaints[0].pain, 4);
 });
+test("a detailed mechanism survives subsequent pain answers and shorter re-extraction", () => {
+  const previous = state([complaint("c1", { mechanism: "Torcedura jugando al fútbol", mechanismClear: true })]);
+  const extracted = state([complaint("c1", { mechanism: "Torcedura", mechanismClear: false, evidence: { mechanism: "torcí" } })]);
+  const data = mergeConsultationData(previous, extracted, "5", { field: "pain", complaintId: "c1" });
+  assert.equal(data.complaints[0].mechanism, "Torcedura jugando al fútbol");
+  assert.equal(data.complaints[0].mechanismClear, true);
+});
+test("mechanism clarification preserves full extracted context instead of a short lastAnswer", () => {
+  const previous = state([complaint("c1", { mechanism: "torcedura", mechanismClear: false })]);
+  const extracted = state([complaint("c1", { mechanism: "Torcedura jugando al fútbol", mechanismClear: true, evidence: { mechanism: "jugando al fútbol" } })]);
+  extracted.lastAnswer = { status: "answered", value: "fútbol", evidence: "fútbol" };
+  const data = mergeConsultationData(previous, extracted, "Fue jugando al fútbol", { field: "mechanism", complaintId: "c1" });
+  assert.equal(data.complaints[0].mechanism, "Torcedura jugando al fútbol");
+  assert.equal(data.complaints[0].evidence.mechanism, "jugando al fútbol");
+  assert.equal(data.complaints[0].mechanismClear, true);
+});
+test("a patient who cannot clarify the mechanism is not asked indefinitely", async () => {
+  const previous = state([complaint("c1", { mechanism: "torcedura", mechanismClear: false })]);
+  const extracted = { ...state([]), lastAnswer: { status: "answered", value: "No informado: no recuerda", evidence: "no recuerdo" } };
+  const turn = await advanceConsultation({ data: previous, version: 2, lastQuestion: { field: "mechanism", complaintId: "c1" } }, msgs("no recuerdo"), {
+    analyze: async () => extracted, chooseFollowup: async () => null,
+  });
+  assert.equal(turn.next.complete, true);
+  assert.equal(turn.data.complaints[0].mechanismClear, true);
+});
 test("screenshot sequence clarifies ambiguous no once, then continues without repeating onset or mechanism", async () => {
   const session = { data: state([complaint("c1", { mechanism: null }), complaint("c2", { location: "espalda baja", pain: null })]), version: 2,
     lastQuestion: { complaintId: "c1", field: "mechanism", key: "c1.mechanism", text: "¿Hubo golpe, esfuerzo, apareció de a poco o no recordás?" } };

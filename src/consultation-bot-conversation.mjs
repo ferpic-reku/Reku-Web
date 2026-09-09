@@ -10,6 +10,7 @@ const quotedIn = (quote, text) => Boolean(normalize(quote)) && normalize(text).i
 export function mergeConsultationData(previous, extracted, latestText, lastQuestion) {
   const complaints = structuredClone(previous?.complaints || []);
   const seen = new Set();
+  const currentMechanisms = new Set();
   for (const incoming of extracted.complaints) {
     let item = complaints.find(existing => incoming.id && existing.id === incoming.id);
     if (!item && incoming.id) continue; // Never accept an invented existing id.
@@ -35,6 +36,10 @@ export function mergeConsultationData(previous, extracted, latestText, lastQuest
         item.evidence[field] = quote;
         if (field === "location") { item.locationClear = (unchanged && item.locationClear) || incoming.locationClear; item.sideRequired = incoming.sideRequired; }
         if (field === "pain") item.painNote = incoming.painNote;
+        if (field === "mechanism") {
+          item.mechanismClear = unchanged && item.mechanismClear === true ? true : incoming.mechanismClear;
+          if (quotedIn(quote, latestText)) currentMechanisms.add(item.id);
+        }
       }
     }
     if (incoming.pain == null && /^No informado:/i.test(incoming.painNote || "") && quotedIn(incoming.evidence?.pain, latestText)) {
@@ -50,11 +55,16 @@ export function mergeConsultationData(previous, extracted, latestText, lastQuest
       const pain = /^\d+(?:[.,]\d+)?$/.test(answer.value.trim()) ? Number(answer.value.replace(",", ".")) : NaN;
       if (Number.isFinite(pain) && pain >= 0 && pain <= 10) { target.pain = pain; target.painNote = null; }
       else if (/^No informado:/i.test(answer.value)) { target.pain = null; target.painNote = answer.value.slice(0, 1000); }
+    } else if (field === "mechanism") {
+      // Prefer the full, grounded extraction over a short lastAnswer ("fútbol").
+      // An answered clarification is terminal even if the patient cannot add detail.
+      if (!currentMechanisms.has(target.id)) target.mechanism = answer.value.slice(0, 1000);
+      target.mechanismClear = true;
     } else {
       target[field] = answer.value.slice(0, 1000);
       if (lastQuestion.field === "detail") target.locationClear = true;
     }
-    target.evidence = { ...target.evidence, [field]: answer.evidence };
+    if (field !== "mechanism" || !currentMechanisms.has(target.id)) target.evidence = { ...target.evidence, [field]: answer.evidence };
   }
   return {
     ...extracted, complaints,

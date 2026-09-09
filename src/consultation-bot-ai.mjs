@@ -14,13 +14,14 @@ const complaintProperties = {
   sideRequired: { type: "boolean" },
   side: string,
   onset: string,
-  mechanism: string,
+  mechanism: { ...string, description: "Cómo ocurrió o empezó, conservando la acción y el contexto/actividad relatados (ej.: torcedura jugando al fútbol), no sólo una categoría de lesión." },
+  mechanismClear: { type: "boolean", description: "¿Se conoce la circunstancia del inicio? 'Me torcí el tobillo' = FALSE aunque sea un verbo; 'me torcí jugando al fútbol' = TRUE. 'Me duele al caminar' describe dolor actual, NO prueba que se lesionó caminando. True también ante inicio gradual/sin desencadenante o desconocimiento/negativa explícitos." },
   pain: { type: ["number", "null"] },
   painNote: string,
   limitations: string,
   evidence: {
     type: "object", additionalProperties: false,
-    properties: Object.fromEntries(evidenceKeys.map(key => [key, { ...string, description: "Cita literal copiada del paciente, sin reformular ni cambiar género o conjugación. Por ejemplo: hombro izquierdo, no izquierda." }])),
+    properties: Object.fromEntries(evidenceKeys.map(key => [key, { ...string, description: "Fragmento CONTIGUO copiado exactamente de un mensaje del paciente, sin reformular ni reordenar palabras." + (key === "pain" ? " Preferí la cita mínima: el número escrito por el paciente (ej. '5 de 10'). No añadas contexto de actividad ni cambies su orden." : key === "reason" ? " Citá lo que dijo (ej. 'me torcí' o 'me duele'), no el motivo normalizado ni una palabra ausente." : " Por ejemplo: hombro izquierdo, no izquierda.") }])),
     required: evidenceKeys,
   },
 };
@@ -63,7 +64,15 @@ Cada campo no nulo de una molestia requiere en evidence una cita LITERAL de un m
 Separá molestias diferentes en complaints (hasta 5), manteniendo orden y detalles de cada una. Campos desconocidos: null, nunca los completes por deducción clínica.
 reason: motivo breve en palabras del paciente. location: zona anatómica y detalle mencionado. locationClear: rodilla, tobillo, hombro, cuello, espalda baja son suficientemente claros; pierna, brazo, espalda sin sector, costado no. Si el paciente dice que no puede precisar tras una pregunta, conservá esa incertidumbre y locationClear=true.
 sideRequired: true para extremidades, articulaciones pares o molestias laterales. side: izquierda, derecha, ambas o lo que el paciente diga; nunca lo infieras. Para zonas centrales no exijas lateralidad.
-onset: desde cuándo empezó o fecha aproximada de lesión; no inventes fechas exactas. mechanism: cómo empezó (golpe, caída, esfuerzo, gradual, sin lesión, causa desconocida explícita). 'Hace meses' no describe un mecanismo.
+onset: desde cuándo empezó o fecha aproximada de lesión; no inventes fechas exactas.
+mechanism: describí CÓMO ocurrió y conservá el contexto o actividad referido, no lo reduzcas a una etiqueta. Si dice 'me torcí el tobillo jugando al fútbol', guardá 'Torcedura jugando al fútbol', no sólo 'torcedura'. Si dice 'levantando una caja en el trabajo', conservá la caja y el trabajo. La actividad que agrava el dolor hoy NO es el mecanismo inicial. 'Hace meses' tampoco describe un mecanismo. evidence.mechanism debe citar el fragmento que respalda también la actividad/contexto. Si amplía después, integrá lo ya conocido con el nuevo dato; no lo reemplaces por una versión más corta.
+mechanismClear=false si sólo nombró 'torcedura', 'golpe', 'tirón', etc. y no explicó qué pasó o qué estaba haciendo. mechanismClear=true si ya relató la circunstancia/acción, aunque no sepa describir un movimiento preciso; también ante inicio gradual, sin desencadenante, causa desconocida explícita o negativa a responder. No exijas detalles biomecánicos, deportivos, laborales o personales adicionales. Si la última pregunta fue por mechanism, lastAnswer.value debe conservar el mecanismo completo conocido, no sólo la última palabra. Una respuesta válida a esa pregunta cierra la aclaración: no vuelvas a pedir contexto si no puede precisarlo.
+Ejemplos obligatorios de interpretación (no son hechos del paciente):
+- 'Hace dos meses me torcí el tobillo. Me duele al caminar': mechanism='Torcedura; circunstancia no informada', mechanismClear=false. Caminar es el agravante ACTUAL, no la actividad al lesionarse.
+- 'Me torcí el tobillo jugando al fútbol': mechanism='Torcedura jugando al fútbol', mechanismClear=true.
+- 'Sentí un tirón': mechanism='Tirón; circunstancia no informada', mechanismClear=false.
+- 'Empezó de a poco, no sé por qué': mechanism='Inicio gradual, sin causa conocida', mechanismClear=true.
+- 'No recuerdo cómo empezó': mechanism='No informado: no recuerda', mechanismClear=true, evidence.mechanism='No recuerdo cómo empezó'. Esto también vale si lo cuenta de entrada, sin que se lo hayan preguntado; NO lo conviertas en null ni le pidas que lo repita.
 pain: dolor ACTUAL de 0 a 10. Nunca conviertas leve/moderado/fuerte a un número. Aceptá 0 si dice sin dolor. Si da rango, no elijas un número: null y guardá el rango en painNote. Si dice 15, null. painNote: contexto como dolor al caminar/reposo o negativa explícita a cuantificar.
 limitations: actividad/movimiento que cuesta o agrava el dolor; también sirve 'no me limita'. No infieras limitaciones.
 priorCare: consultas, diagnóstico referido, cirugía reciente, estudios o tratamientos previos por esta molestia; sólo si lo dijo. goal: actividad que quiere recuperar.
@@ -141,7 +150,7 @@ export const nextConsultationStep = (data) => {
     if (!item.locationClear) return question("detail", `Para ubicar mejor la molestia${area}, ¿en qué parte exacta la sentís?`);
     if (item.sideRequired && !hasValue(item.side)) return question("side", `Esa molestia${area}, ¿es del lado izquierdo, derecho o de ambos lados?`);
     if (!hasValue(item.onset)) return question("onset", `¿Desde hace cuánto sentís esta molestia${area}, o cuándo fue la lesión? Puede ser aproximado.`);
-    if (!hasValue(item.mechanism)) return question("mechanism", `¿Recordás cómo empezó la molestia${area}? Si no sabés la causa, podés decirlo.`);
+    if (!hasValue(item.mechanism) || (item.mechanismClear === false && !unknownPainAccepted(item.mechanism))) return question("mechanism", `¿Qué estabas haciendo o qué pasó cuando empezó la molestia${area}? Si no lo recordás, podés decirlo.`);
     if (item.pain === null && !unknownPainAccepted(item.painNote)) return question("pain", `Del 1 al 10, donde 10 es dolor insoportable, ¿cuánto te duele ahora${area}? Si ahora no tenés dolor, podés decir 0.`);
   }
   return { key: "complete", complete: true, text: "Gracias por contarnos lo que te pasa. Ya reunimos la información para tu consulta. Podés revisar y descargar el informe acá abajo. ¡Gracias por confiar en Reku, hasta pronto!" };

@@ -14,6 +14,8 @@ La primera descarga genera el párrafo con la conversación y los datos verifica
 
 ## Continuidad
 
+«Cómo comenzó» conserva la acción y la actividad/circunstancia relatadas (por ejemplo, «Torcedura jugando al fútbol»), sin reducirlas a una categoría ni confundirlas con la actividad que agrava el dolor hoy. `mechanismClear` distingue una etiqueta aislada de una explicación suficiente. Si falta contexto se pregunta brevemente cómo ocurrió; si ya fue aportado no se repregunta. No se exigen detalles biomecánicos: una respuesta a la aclaración, el inicio gradual, la causa desconocida o una negativa explícita permiten continuar. El ensayo opt-in `node --env-file=.env scripts/eval-consultation-mechanism.mjs` valida extracción y continuidad con relatos ficticios.
+
 El servidor conserva los datos verificados de cada molestia con un identificador estable (`c1`, `c2`, etc.) y la última pregunta, su campo y su molestia. Una omisión en la extracción siguiente no borra lo ya confirmado. Las correcciones necesitan evidencia literal del mensaje actual. Las respuestas breves se interpretan contra la última pregunta, no contra el orden de las molestias que devuelva el modelo.
 
 Una respuesta ambigua recibe como máximo una aclaración corta; si sigue sin aclararse, se registra la incertidumbre para el profesional. No se inventa una causa ni se repite indefinidamente la misma pregunta. Las sesiones continúan siendo temporales en memoria (dos horas); un reinicio requiere iniciar una conversación nueva.
