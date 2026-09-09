@@ -78,20 +78,6 @@ export const renderConsultationReport = async (session, { narrative = fallbackCo
     heading(complaints.length > 1 ? `Datos obtenidos - Motivo ${index + 1}` : "Datos obtenidos de la conversación");
     rows.forEach(([label, value]) => row(label, value));
   });
-  const followups = (session.data?.followups || []).filter(item => item.answer !== null);
-  if (followups.length) {
-    // Keep the heading, a useful amount of detail and the closing notice together.
-    if (doc.y + 220 > 750) doc.addPage();
-    heading("Detalles adicionales del relato");
-    followups.forEach((item, index) => {
-      const complaint = session.data.complaints.find(complaint => complaint.id === item.complaintId);
-      row("Molestia consultada", complaint?.location);
-      row(`Pregunta ${index + 1}`, item.question);
-      // Chunk long verbatim responses so a single row cannot overrun a page.
-      const parts = String(item.answer).match(/[\s\S]{1,699}(?:\s|$)|\S{1,700}/g) || ["No informado"];
-      parts.forEach((part, partIndex) => row(partIndex ? "Respuesta (continuación)" : "Respuesta del paciente (textual)", part));
-    });
-  }
   const notice = "Resumen asistido por IA a partir del relato del paciente. No constituye un diagnóstico, una indicación de tratamiento ni una evaluación de aptitud para telerehabilitación. Los datos no informados y las incertidumbres requieren revisión del profesional. No se realizó un descarte completo de signos de alarma.";
   doc.font("Helvetica").fontSize(9);
   if (doc.y + 12 + doc.heightOfString(notice, { width, lineGap: 3 }) > 750) doc.addPage();

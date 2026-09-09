@@ -129,3 +129,11 @@ test("the report includes a real PDF with no required patient identity", async (
   const pages = Number(pdf.toString("latin1").match(/\/Type \/Pages\s+\/Count (\d+)\b/)?.[1]);
   assert.equal(pages, 1, "Short reports must not create footer-only pages");
 });
+test("additional answers stay in the narrative without generating a duplicate PDF appendix", async () => {
+  const data = complete();
+  data.complaints[0].id = "c1";
+  data.complaints[0].limitations = "me cuesta caminar";
+  data.followups = [{ complaintId: "c1", topic: "actividades", question: "¿Cambió tu rutina?", answer: "me cuesta caminar" }];
+  const pdf = await renderConsultationReport({ data, brand: { name: "Reku" }, updatedAt: Date.now(), status: "complete" });
+  assert.equal(Number(pdf.toString("latin1").match(/\/Type \/Pages\s+\/Count (\d+)\b/)?.[1]), 1);
+});

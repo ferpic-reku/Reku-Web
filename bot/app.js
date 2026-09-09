@@ -60,13 +60,6 @@
     if (cobranded) { $('agreement-logo').src = '/api/bot/logo'; $('agreement-logo').alt = brand.name; }
     $('brand-caption').textContent = brand.slug ? `${brand.name} · Telerehabilitación con Reku` : 'Reku · Telerehabilitación con acompañamiento profesional';
   };
-  const row = (list, label, value) => {
-    const dt = document.createElement('dt'); dt.textContent = label;
-    const dd = document.createElement('dd');
-    const text = String(value || 'No informado').trim();
-    dd.textContent = text.replace(/^\p{L}/u, letter => letter.toLocaleUpperCase('es-AR'));
-    list.append(dt, dd);
-  };
   const render = () => {
     renderMessages(session?.messages || welcome.map(text => ({ role: 'assistant', text })));
     $('start-panel').hidden = Boolean(session);
@@ -79,25 +72,7 @@
     $('chat-status').textContent = done ? 'Tu relato quedó resumido' : 'Te acompañamos antes de la consulta';
     if (session) brandPage(session.brand);
     if (done) {
-      $('result-title').textContent = session.status === 'urgent' ? 'Priorizá una evaluación presencial' : session.status === 'partial' ? 'Tu informe parcial está disponible' : 'Ya está listo tu informe';
-      $('summary').replaceChildren();
-      session.data.complaints.forEach((item, index) => {
-        if (session.data.complaints.length > 1) { const h = document.createElement('h4'); h.textContent = `Motivo ${index + 1}`; $('summary').append(h); }
-        const list = document.createElement('dl');
-        row(list, 'Motivo', item.reason);
-        row(list, 'Zona', [item.location, item.side].filter(Boolean).join(' · '));
-        row(list, 'Desde cuándo', item.onset);
-        row(list, 'Cómo empezó', item.mechanism);
-        row(list, 'Dolor actual', item.pain !== null ? `${item.pain}/10` : item.painNote);
-        $('summary').append(list);
-      });
-      (session.data.followups || []).filter(item => item.answer !== null).forEach(item => {
-        const list = document.createElement('dl');
-        const complaint = session.data.complaints.find(complaint => complaint.id === item.complaintId);
-        row(list, 'Detalle adicional sobre', complaint?.location);
-        row(list, item.question, item.answer);
-        $('summary').append(list);
-      });
+      $('result-title').textContent = session.status === 'partial' ? 'Tu informe parcial está listo' : 'Tu informe está listo';
       $('result').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
     updateControls();
@@ -237,7 +212,6 @@
     } catch (error) { showError(error.message || 'No pudimos descargar el informe.'); }
     finally { $('download').disabled = false; }
   });
-  $('restart').addEventListener('click', () => { session = null; pendingMessage = null; $('consent').checked = false; $('message').value = ''; clearAudio(); render(); showError(); });
   window.addEventListener('pagehide', () => { stopRecording(true); clearAudio(); });
   const init = async () => {
     render();

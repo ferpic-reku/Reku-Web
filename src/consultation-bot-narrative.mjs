@@ -18,6 +18,15 @@ export function fallbackConsultationNarrative(data) {
   });
   if (data?.priorCare) parts.push(`Como antecedente referido, menciona: ${clean(data.priorCare)}.`);
   if (data?.goal) parts.push(`Su objetivo expresado es: ${clean(data.goal)}.`);
+  // Additional answers live in the opening narrative, not a duplicate Q&A
+  // section. Preserve them even when the AI rewrite fails or is rejected.
+  for (const item of data?.followups || []) {
+    const answer = clean(item.answer);
+    if (!answer || (answer.length >= 15 && evidenceText(parts.join(" ")).includes(evidenceText(answer)))) continue;
+    const complaint = data?.complaints?.find(complaint => complaint.id === item.complaintId);
+    const context = [clean(item.topic) || "un detalle adicional", clean(complaint?.location)].filter(Boolean).join(" - ");
+    parts.push(`Al ampliar sobre ${context}, respondió: ${answer}.`);
+  }
   return parts.join(" ") || "No se pudo organizar un relato suficiente. Los datos disponibles se detallan debajo.";
 }
 

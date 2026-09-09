@@ -75,12 +75,25 @@ const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {} } =
   };
 };
 
-test('summary values capitalize only the initial letter, preserving numbers and original facts', async () => {
-  const complaint = { reason: 'dolor', location: 'en la zona baja, lumbares', onset: '2 meses', mechanism: 'en el gimnasio, haciendo peso muerto', pain: 5 };
-  const app = await setup({ sessionOverrides: { status: 'complete', data: { complaints: [complaint], followups: [] } } });
-  const values = app.get('summary').children.flatMap(list => list.children).filter(node => node.tagName === 'dd').map(node => node.textContent);
-  assert.deepEqual(values, ['Dolor', 'En la zona baja, lumbares', '2 meses', 'En el gimnasio, haciendo peso muerto', '5/10']);
-  assert.equal(complaint.reason, 'dolor');
+for (const status of ['complete', 'partial', 'urgent']) test('finished ' + status + ' result shows only readiness and download, without clinical summary', async () => {
+  const data = { complaints: [{ reason: 'dolor', location: 'tobillo derecho', pain: 5 }], followups: [{ question: '¿Cambió tu rutina?', answer: 'Me cuesta caminar' }] };
+  const app = await setup({ sessionOverrides: { status, data, messages: [{ role: 'assistant', text: 'Mensaje de cierre u orientación' }] } });
+  assert.equal(app.get('result').hidden, false);
+  assert.equal(app.get('composer').hidden, true);
+  assert.equal(app.get('result-title').textContent, status === 'partial' ? 'Tu informe parcial está listo' : 'Tu informe está listo');
+  assert.equal(typeof app.get('download').handlers.click, 'function');
+  assert.equal(app.get('summary').children.length, 0);
+  assert.equal(app.get('messages').children.length, 1);
+  assert.equal(data.followups[0].answer, 'Me cuesta caminar');
+});
+test('result markup contains only the title and download button', async () => {
+  const html = await readFile(new URL('../bot/index.html', import.meta.url), 'utf8');
+  const result = html.match(/<div id="result"[\s\S]*?<\/div>/)?.[0];
+  assert.ok(result);
+  assert.deepEqual([...result.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]), ['result', 'result-title', 'download']);
+  const script = await readFile(new URL('../bot/app.js', import.meta.url), 'utf8');
+  assert.ok(!script.includes("$('summary')"));
+  assert.ok(!script.includes("$('restart')"));
 });
 
 test('bot API requests stay on the current subdomain without forwarding form parameters', async () => {

@@ -64,3 +64,15 @@ test("quota or concurrency failures use a cached fallback", async () => {
   await cachedConsultationNarrative(current, { generate });
   assert.equal(calls, 1);
 });
+test("fallback integrates additional answers without a separate Q&A section or exact duplication", () => {
+  const current = session();
+  current.data.followups = [
+    { complaintId: "c1", topic: "actividades", answer: "le cuesta subir escaleras" },
+    { complaintId: "c1", topic: "hinchazón", answer: "No noté hinchazón" },
+    { complaintId: "c1", topic: "descanso", answer: null },
+  ];
+  const narrative = fallbackConsultationNarrative(current.data);
+  assert.equal(narrative.split("le cuesta subir escaleras").length - 1, 1);
+  assert.match(narrative, /hinchazón - rodilla derecha, respondió: No noté hinchazón/);
+  assert.ok(!narrative.includes("descanso"));
+});

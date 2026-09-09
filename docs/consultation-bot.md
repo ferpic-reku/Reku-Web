@@ -6,7 +6,9 @@ El bot obtiene el acuerdo exclusivamente del subdominio registrado: `https://ypf
 
 ## Informe PDF
 
-El logo del acuerdo se presenta en un área de 126 × 35 puntos (30 % menor), sin cambiar el de Reku. Después de los datos de cabecera se muestra «El relato del paciente»: un párrafo hilado en tercera persona, identificado como síntesis, no cita textual. Luego aparecen los datos tabulados y las respuestas adicionales. Se elimina la sección «Contexto para la consulta»; los antecedentes y objetivos efectivamente referidos se integran en el relato.
+El logo del acuerdo se presenta en un área de 126 × 35 puntos (30 % menor), sin cambiar el de Reku. Después de los datos de cabecera se muestra «El relato del paciente»: un párrafo hilado en tercera persona, identificado como síntesis, no cita textual. Luego aparecen los datos tabulados. No se repiten las preguntas y respuestas en una sección «Detalles adicionales del relato»; las respuestas adicionales se integran al relato, también en la alternativa sin reescritura de IA. Se elimina la sección «Contexto para la consulta»; los antecedentes y objetivos efectivamente referidos se integran en el relato.
+
+En la pantalla final sólo se muestra que el informe está listo y el botón para descargarlo. No se vuelve a listar información clínica ni preguntas y respuestas. El historial del chat se conserva, incluida cualquier orientación urgente, y los informes parciales se identifican como tales.
 
 La primera descarga genera el párrafo con la conversación y los datos verificados. Cada oración necesita evidencia literal y una revisión independiente exige fidelidad, completitud, incertidumbres conservadas, ausencia de diagnósticos añadidos, contradicciones y lenguaje irrespetuoso. Ante cualquier duda o error se usa un relato determinista basado en los datos verificados. No se inventan datos para completar vacíos. El resultado se cachea por versión de sesión, también para descargas concurrentes; hay límites de uso y concurrencia. Cada llamada tiene 20 segundos de timeout, `store: false` y no registra texto clínico en logs.
 
