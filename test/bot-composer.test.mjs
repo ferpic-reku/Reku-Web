@@ -4,6 +4,15 @@ import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import vm from 'node:vm';
 
+test('intro invites a detailed account and steps remain informational without progress highlighting', async () => {
+  const html = await readFile(new URL('../bot/index.html', import.meta.url), 'utf8');
+  const script = await readFile(new URL('../bot/app.js', import.meta.url), 'utf8');
+  assert.match(html, /con el mayor detalle que puedas\. No te preocupes por el orden: contalo como te salga\./);
+  assert.equal((html.match(/class="step" id="step-/g) || []).length, 3);
+  assert.doesNotMatch(html, /class="step active"/);
+  assert.doesNotMatch(script, /\$\('step-(?:talk|detail|report)'\)/);
+});
+
 test('audio button stays light green before recording and when ready to send', async () => {
   const css = await readFile(new URL('../bot/styles.css', import.meta.url), 'utf8');
   assert.match(css, /#record\{[^}]*background:#e0f3e8;[^}]*color:#236747;/);

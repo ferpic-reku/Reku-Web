@@ -73,9 +73,6 @@
     const done = session && session.status !== 'collecting';
     $('composer').hidden = !session || done;
     $('result').hidden = !done;
-    $('step-talk').classList.toggle('active', !session?.version);
-    $('step-detail').classList.toggle('active', Boolean(session?.version && !done));
-    $('step-report').classList.toggle('active', Boolean(done));
     $('chat-status').textContent = done ? 'Tu relato quedó resumido' : 'Te acompañamos antes de la consulta';
     if (session) brandPage(session.brand);
     if (done) {
