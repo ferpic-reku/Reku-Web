@@ -28,7 +28,12 @@ API: `POST /api/bot/session`, `POST /api/bot/message`,
 `POST /api/bot/transcribe`, `GET /api/bot/report`. La sesión usa una cookie
 HttpOnly y SameSite=Strict, con validación de origen para escrituras. Texto
 limitado a 4000 caracteres; grabación hasta 2 minutos; archivo hasta 8 MB.
-La transcripción se muestra editable antes de enviarla. Las llamadas a OpenAI
+Al tocar «Enviar» durante la grabación, se transcribe y se envía directamente al
+chat, sin colocar la transcripción en el campo de escritura. Los borradores de
+texto se conservan. Un control local de nivel de audio rechaza el silencio;
+no garantiza distinguir voz de todo ruido ambiental. Si falla el envío, se puede
+reintentar el audio (sin retranscribir si ya hay texto) o descartarlo.
+Las llamadas a OpenAI
 usan HTTPS y Responses con `store: false`.
 
 ## Alcance y almacenamiento de la prueba
