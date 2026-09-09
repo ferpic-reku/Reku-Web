@@ -44,6 +44,11 @@ relacionarlo con el turno/paciente autenticados y exponerlo con autorización
 profesional desde la sala de espera y la ficha del paciente. No está activa en
 esta prueba y no altera el flujo de reservas existente.
 
+Al integrar con el turno, personalizar el primer mensaje con el nombre del
+paciente obtenido del contexto autenticado: «Hola Ana, te damos la bienvenida a Reku…».
+Usar «Hola {nombre},» al comienzo; no pedir el nombre nuevamente ni tomarlo de
+parámetros públicos. Si no hay nombre disponible, mantener el saludo genérico.
+
 Fuentes de implementación:
 - https://developers.openai.com/api/docs/guides/structured-outputs
 - https://developers.openai.com/api/docs/guides/speech-to-text
