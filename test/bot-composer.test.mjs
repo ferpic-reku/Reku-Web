@@ -26,6 +26,8 @@ test('recording cancellation sits beside audio send and the textbox cannot be re
   const actions = html.match(/<div class="audio-actions">([\s\S]*?)<\/div>/)[1];
   assert.match(actions, /id="record"[\s\S]*id="cancel-recording"/);
   assert.match(css, /#message\{resize:none\}/);
+  assert.match(css, /#cancel-recording\{[^}]*color:var\(--muted\)/);
+  assert.match(css, /\.recording-help\{[^}]*color:var\(--muted\)/);
   assert.equal((html.match(/id="cancel-recording"/g) || []).length, 1);
   assert.match(html, /class="recording-timer">Grabando <strong id="timer">0:00<\/strong><\/div>\s*<div class="recording-help">Tocá Enviar/);
 });
