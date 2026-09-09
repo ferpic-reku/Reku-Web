@@ -91,7 +91,7 @@ test("provider extraction failures do not mutate the session", async () => {
 
 const candidate = { question: "¿Notaste algún moretón en ese muslo?", complaintId: "c1", topic: "moretón", evidence: "tirón en el muslo derecho" };
 const approved = { relevant: true, useful: true, notAlreadyAnswered: true, clear: true, respectful: true, nonIntrusive: true,
-  nonDiscriminatory: true, noDiagnosis: true, safe: true, grounded: true, confidence: "high" };
+  nonDiscriminatory: true, noDiagnosis: true, safe: true, grounded: true, functionalImpactAppropriate: true, confidence: "high" };
 function mockProvider(outputs) {
   const requests = [];
   return { requests, settings: { apiKey: "test", model: "test" }, fetchImpl: async (_url, options) => {

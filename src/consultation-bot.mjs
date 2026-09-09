@@ -1,12 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { isProduction } from "./config.mjs";
 import { getClientIp, parseCookies, readBody, sendJson, withSecurityHeaders } from "./http.mjs";
-import { requestIdentifiesAgreement, resolveAgreementForRequest } from "./agreement-resolution.mjs";
+import { agreementPrefixForRequest } from "./agreement-resolution.mjs";
+import { getAgreementBySubdomainPrefix } from "./db.mjs";
 import { consumeRateLimit } from "./rate-limit.mjs";
 import { parseMultipartForm } from "./uploads.mjs";
 import { transcribeConsultation, botSettings } from "./consultation-bot-ai.mjs";
 import { advanceConsultation } from "./consultation-bot-conversation.mjs";
 import { loadBotBrandLogo, renderConsultationReport } from "./consultation-bot-report.mjs";
+import { buildConsultationNarrative, cachedConsultationNarrative } from "./consultation-bot-narrative.mjs";
 
 export const welcomeMessages = [
   "Hola, bienvenido a Reku. Necesitamos que nos cuentes el motivo de tu consulta: si es una lesión o una dolencia que venís arrastrando, cómo empezó, en qué zona, cuánto te duele del 1 al 10 y desde hace cuánto tiempo.",
@@ -32,11 +34,13 @@ export const requireBotOrigin = (request) => {
   try { origin = new URL(request.headers.origin); } catch { throw fail("Recargá la página para continuar.", 403); }
   if (origin.host !== request.headers.host || (isProduction && origin.protocol !== "https:") || !["http:", "https:"].includes(origin.protocol)) throw fail("Origen no permitido.", 403);
 };
-const context = async (request, url) => {
-  const agreement = await resolveAgreementForRequest(request, url);
-  if (requestIdentifiesAgreement(request, url) && !agreement) throw fail("No encontramos ese acuerdo.", 404);
+export const resolveBotBrand = async (request, { findAgreement = getAgreementBySubdomainPrefix } = {}) => {
+  const prefix = agreementPrefixForRequest(request);
+  const agreement = prefix ? await findAgreement(prefix) : null;
+  if (prefix && !agreement) throw fail("No encontramos ese acuerdo.", 404);
   return agreement ? { name: agreement.name, slug: agreement.slug, cobranded: Boolean(agreement.cobranded), logo_url: agreement.cobranded ? agreement.logo_url : "" } : { name: "Reku", slug: "", cobranded: false, logo_url: "" };
 };
+const context = request => resolveBotBrand(request);
 
 export const handleConsultationBot = async (request, response, url) => {
   try {
@@ -89,7 +93,13 @@ export const handleConsultationBot = async (request, response, url) => {
     if (request.method === "GET" && action === "report") {
       if (!session.data || session.status === "collecting") throw fail("Primero completá la conversación.", 409);
       await consumeRateLimit({ scope: "bot.report", key: getClientIp(request), limit: 40, windowSeconds: 3600 });
-      const pdf = await renderConsultationReport(session);
+      const narrative = await cachedConsultationNarrative(session, { generate: async current => {
+        await enforceAIQuota(request);
+        if (activeRequests >= 6) throw new Error("BOT_BUSY");
+        activeRequests++;
+        try { return await buildConsultationNarrative(current); } finally { activeRequests--; }
+      } });
+      const pdf = await renderConsultationReport(session, { narrative });
       response.writeHead(200, withSecurityHeaders({ "Content-Type": "application/pdf", "Content-Disposition": 'attachment; filename="reku-motivo-de-consulta.pdf"', "Cache-Control": "private, no-store" }, { privateRoute: true }));
       response.end(pdf);
       return;

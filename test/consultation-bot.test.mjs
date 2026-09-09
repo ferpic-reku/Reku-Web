@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { analyzeConsultation, nextConsultationStep, transcribeConsultation } from "../src/consultation-bot-ai.mjs";
-import { requireBotOrigin } from "../src/consultation-bot.mjs";
+import { requireBotOrigin, resolveBotBrand } from "../src/consultation-bot.mjs";
 import { serveStatic } from "../src/http.mjs";
 import { renderConsultationReport } from "../src/consultation-bot-report.mjs";
 
@@ -97,6 +97,23 @@ test("bot mutations reject missing and foreign origins", () => {
   assert.throws(() => requireBotOrigin({ headers: { host: "www.reku.io", origin: "https://evil.test" } }), /Origen/);
   assert.doesNotThrow(() => requireBotOrigin({ headers: { host: "www.reku.io", origin: "https://www.reku.io" } }));
 });
+test("bot branding comes only from the agreement subdomain, never query or forwarded host", async () => {
+  const prefixes = [];
+  const findAgreement = async prefix => {
+    prefixes.push(prefix);
+    return prefix === "ypf" ? { name: "YPF", slug: "ypf-agreement", cobranded: true, logo_url: "/uploads/agreements/ypf.png" } : null;
+  };
+  const brand = await resolveBotBrand({ url: "/api/bot/context?form=artro", headers: { host: "ypf.reku.io" } }, { findAgreement });
+  assert.equal(brand.slug, "ypf-agreement");
+  assert.equal(brand.logo_url, "/uploads/agreements/ypf.png");
+  for (const host of ["www.reku.io", "reku.io"]) {
+    const general = await resolveBotBrand({ url: "/api/bot/context?form=ypf", headers: { host, "x-forwarded-host": "ypf.reku.io" } }, { findAgreement });
+    assert.equal(general.slug, "");
+    assert.equal(general.cobranded, false);
+  }
+  assert.deepEqual(prefixes, ["ypf"]);
+  await assert.rejects(resolveBotBrand({ headers: { host: "unknown.reku.io" } }, { findAgreement }), error => error.statusCode === 404);
+});
 test("microphone permission is enabled only for bot pages", async () => {
   for (const path of ["/bot/index.html", "/turnos/index.html"]) {
     let headers;
@@ -109,5 +126,6 @@ test("the report includes a real PDF with no required patient identity", async (
   const pdf = await renderConsultationReport({ data: complete(), brand: { name: "Reku" }, updatedAt: Date.now(), status: "complete" });
   assert.equal(pdf.subarray(0, 5).toString(), "%PDF-");
   assert.ok(pdf.length > 3000);
-  assert.match(pdf.toString("latin1"), /\/Type \/Pages\s+\/Count 1\b/);
+  const pages = Number(pdf.toString("latin1").match(/\/Type \/Pages\s+\/Count (\d+)\b/)?.[1]);
+  assert.equal(pages, 1, "Short reports must not create footer-only pages");
 });

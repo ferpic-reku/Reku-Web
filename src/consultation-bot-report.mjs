@@ -3,6 +3,7 @@ import sharp from "sharp";
 import { join } from "node:path";
 import { root } from "./config.mjs";
 import { resolvePublicUploadPath } from "./http.mjs";
+import { fallbackConsultationNarrative } from "./consultation-bot-narrative.mjs";
 
 export const loadBotBrandLogo = async (brand) => {
   if (!brand.cobranded || !brand.logo_url) return null;
@@ -16,12 +17,12 @@ export const consultationReportRows = (data) => (data?.complaints || []).map((it
   ["Lado", item.side || (item.sideRequired ? "No informado" : "No aplica")],
   ["Inicio / antigüedad", item.onset],
   ["Cómo comenzó", item.mechanism],
-  ["Dolor actual", [item.pain !== null ? `${item.pain}/10` : "No cuantificado", item.painNote].filter(Boolean).join(". ")],
+  ["Dolor actual", [Number.isFinite(item.pain) ? `${item.pain}/10` : "No cuantificado", item.painNote].filter(Boolean).join(". ")],
   ["Limitación / actividad que lo agrava", item.limitations],
 ]);
 
-export const renderConsultationReport = async (session) => {
-  const doc = new PDFDocument({ size: "A4", margin: 48, bufferPages: true, info: { Title: "Reku - Motivo de consulta", Author: "Reku" } });
+export const renderConsultationReport = async (session, { narrative = fallbackConsultationNarrative(session.data) } = {}) => {
+  const doc = new PDFDocument({ size: "A4", margins: { top: 48, left: 48, right: 48, bottom: 88 }, bufferPages: true, info: { Title: "Reku - Motivo de consulta", Author: "Reku" } });
   const chunks = [];
   const ready = new Promise((resolve, reject) => {
     doc.on("data", (chunk) => chunks.push(chunk));
@@ -42,8 +43,10 @@ export const renderConsultationReport = async (session) => {
   const row = (label, value) => {
     const text = String(value || "No informado");
     doc.font("Helvetica").fontSize(10);
-    const height = Math.max(24, doc.heightOfString(text, { width: 315 }) + 14);
-    if (doc.y + height > 755) doc.addPage();
+    const valueHeight = doc.heightOfString(text, { width: 315 });
+    doc.font("Helvetica-Bold").fontSize(9);
+    const height = Math.max(24, valueHeight + 14, doc.heightOfString(label, { width: 163 }) + 14);
+    if (doc.y + height > 750) doc.addPage();
     const y = doc.y;
     doc.font("Helvetica-Bold").fontSize(9).fillColor(muted).text(label, 48, y, { width: 163 });
     doc.font("Helvetica").fontSize(10).fillColor(navy).text(text, 232, y, { width: 315 });
@@ -67,13 +70,18 @@ export const renderConsultationReport = async (session) => {
     row("Relato que motivó el aviso", session.data.urgentReason);
     row("Orientación mostrada", "Evaluación médica presencial urgente. No esperar al turno de telerehabilitación; contactar emergencias locales si corresponde.");
   }
+  heading("El relato del paciente");
+  doc.font("Helvetica").fontSize(9).fillColor(muted).text("Síntesis organizada a partir de sus mensajes; no es una cita textual.", 48, doc.y, { width });
+  doc.moveDown(0.6).fontSize(11).fillColor(navy).text(narrative, 48, doc.y, { width, lineGap: 3 });
   const complaints = consultationReportRows(session.data);
   complaints.forEach((rows, index) => {
-    heading(complaints.length > 1 ? `Motivo ${index + 1}` : "Lo que nos cuenta el paciente");
+    heading(complaints.length > 1 ? `Datos obtenidos - Motivo ${index + 1}` : "Datos obtenidos de la conversación");
     rows.forEach(([label, value]) => row(label, value));
   });
   const followups = (session.data?.followups || []).filter(item => item.answer !== null);
   if (followups.length) {
+    // Keep the heading, a useful amount of detail and the closing notice together.
+    if (doc.y + 220 > 750) doc.addPage();
     heading("Detalles adicionales del relato");
     followups.forEach((item, index) => {
       const complaint = session.data.complaints.find(complaint => complaint.id === item.complaintId);
@@ -84,19 +92,18 @@ export const renderConsultationReport = async (session) => {
       parts.forEach((part, partIndex) => row(partIndex ? "Respuesta (continuación)" : "Respuesta del paciente (textual)", part));
     });
   }
-  // Keep the final context and notice together when short, away from footers.
-  if (doc.y + 170 > 755) doc.addPage();
-  heading("Contexto para la consulta");
-  row("Atención / antecedentes referidos", session.data?.priorCare);
-  row("Objetivo del paciente", session.data?.goal);
   const notice = "Resumen asistido por IA a partir del relato del paciente. No constituye un diagnóstico, una indicación de tratamiento ni una evaluación de aptitud para telerehabilitación. Los datos no informados y las incertidumbres requieren revisión del profesional. No se realizó un descarte completo de signos de alarma.";
   doc.font("Helvetica").fontSize(9);
-  if (doc.y + 12 + doc.heightOfString(notice, { width, lineGap: 3 }) > 755) doc.addPage();
+  if (doc.y + 12 + doc.heightOfString(notice, { width, lineGap: 3 }) > 750) doc.addPage();
   doc.moveDown(0.8).fillColor(muted).text(notice, 48, doc.y, { width, lineGap: 3 });
   const range = doc.bufferedPageRange();
   for (let i = 0; i < range.count; i++) {
     doc.switchToPage(i);
+    // Footers live outside the content margin; do not let PDFKit paginate them.
+    const bottom = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
     doc.font("Helvetica").fontSize(8).fillColor(muted).text(`REKU  ·  INFORME DE PRUEBA  ·  ${i + 1} / ${range.count}`, 48, 776, { width, lineBreak: false });
+    doc.page.margins.bottom = bottom;
   }
   doc.end();
   return ready;

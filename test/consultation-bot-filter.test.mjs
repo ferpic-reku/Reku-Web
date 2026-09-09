@@ -6,7 +6,7 @@ import { advanceConsultation } from "../src/consultation-bot-conversation.mjs";
 const messages = [{ role: "user", text: "Desde ayer tengo una molestia en el hombro derecho." }];
 const data = { complaints: [{ id: "c1", location: "hombro derecho", reason: "molestia", locationClear: true, sideRequired: true, side: "derecha", onset: "ayer", mechanism: "caída", pain: 3 }], followups: [] };
 const candidate = { question: "¿Notaste hinchazón en ese hombro?", topic: "hinchazón", complaintId: "c1", evidence: "hombro derecho" };
-const checks = ["relevant", "useful", "notAlreadyAnswered", "clear", "respectful", "nonIntrusive", "nonDiscriminatory", "noDiagnosis", "safe", "grounded"];
+const checks = ["relevant", "useful", "notAlreadyAnswered", "clear", "respectful", "nonIntrusive", "nonDiscriminatory", "noDiagnosis", "safe", "grounded", "functionalImpactAppropriate"];
 const approved = { ...Object.fromEntries(checks.map(key => [key, true])), confidence: "high" };
 
 for (const question of [

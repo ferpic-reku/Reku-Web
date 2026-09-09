@@ -1,8 +1,6 @@
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
-  const query = new URLSearchParams(location.search);
-  const suffix = query.has('form') ? `?form=${encodeURIComponent(query.get('form'))}` : '';
   let session = null;
   let busy = false;
   let sendingMessage = false;
@@ -22,7 +20,7 @@
   ];
   const showError = (message = '') => { $('error').textContent = message; $('error').hidden = !message; };
   const api = async (path, body) => {
-    const response = await fetch(`/api/bot/${path}${suffix}`, {
+    const response = await fetch(`/api/bot/${path}`, {
       credentials: 'same-origin', cache: 'no-store',
       ...(body ? { method: 'POST', body: body instanceof FormData ? body : JSON.stringify(body), headers: body instanceof FormData ? {} : { 'Content-Type': 'application/json' } } : {}),
       signal: AbortSignal.timeout(125_000),
@@ -59,7 +57,7 @@
     const cobranded = brand.cobranded && /^\/uploads\/agreements\/[\w.-]+$/.test(brand.logo_url || '');
     document.body.classList.toggle('cobranded', Boolean(cobranded));
     $('agreement-logo').hidden = !cobranded;
-    if (cobranded) { $('agreement-logo').src = `/api/bot/logo${suffix}`; $('agreement-logo').alt = brand.name; }
+    if (cobranded) { $('agreement-logo').src = '/api/bot/logo'; $('agreement-logo').alt = brand.name; }
     $('brand-caption').textContent = brand.slug ? `${brand.name} · Telerehabilitación con Reku` : 'Reku · Telerehabilitación con acompañamiento profesional';
   };
   const row = (list, label, value) => {
@@ -229,7 +227,7 @@
   $('download').addEventListener('click', async () => {
     $('download').disabled = true; showError();
     try {
-      const response = await fetch(`/api/bot/report${suffix}`, { credentials: 'same-origin', cache: 'no-store' });
+      const response = await fetch('/api/bot/report', { credentials: 'same-origin', cache: 'no-store' });
       if (!response.ok) throw new Error((await response.json()).error);
       const url = URL.createObjectURL(await response.blob());
       const link = document.createElement('a'); link.href = url; link.download = 'reku-motivo-de-consulta.pdf'; link.click();

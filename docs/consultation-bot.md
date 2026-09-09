@@ -1,5 +1,15 @@
 # Entrevista del bot Reku
 
+## Acuerdo por subdominio
+
+El bot obtiene el acuerdo exclusivamente del subdominio registrado: `https://ypf.reku.io/bot`. Usa `subdomain_prefix` para buscar el acuerdo, no presupone que sea igual al slug. Logo, sesión y PDF conservan ese acuerdo. `https://www.reku.io/bot` es la versión general: `?form=` no selecciona ni cambia el acuerdo. Un subdominio de acuerdo inexistente devuelve 404. Las cookies siguen siendo host-only y no se comparten conversaciones entre acuerdos. No cambia la resolución de los formularios o turnos existentes.
+
+## Informe PDF
+
+Después de los datos de cabecera se muestra «El relato del paciente»: un párrafo hilado en tercera persona, identificado como síntesis, no cita textual. Luego aparecen los datos tabulados y las respuestas adicionales. Se elimina la sección «Contexto para la consulta»; los antecedentes y objetivos efectivamente referidos se integran en el relato.
+
+La primera descarga genera el párrafo con la conversación y los datos verificados. Cada oración necesita evidencia literal y una revisión independiente exige fidelidad, completitud, incertidumbres conservadas, ausencia de diagnósticos añadidos, contradicciones y lenguaje irrespetuoso. Ante cualquier duda o error se usa un relato determinista basado en los datos verificados. No se inventan datos para completar vacíos. El resultado se cachea por versión de sesión, también para descargas concurrentes; hay límites de uso y concurrencia. Cada llamada tiene 20 segundos de timeout, `store: false` y no registra texto clínico en logs.
+
 ## Continuidad
 
 El servidor conserva los datos verificados de cada molestia con un identificador estable (`c1`, `c2`, etc.) y la última pregunta, su campo y su molestia. Una omisión en la extracción siguiente no borra lo ya confirmado. Las correcciones necesitan evidencia literal del mensaje actual. Las respuestas breves se interpretan contra la última pregunta, no contra el orden de las molestias que devuelva el modelo.
@@ -13,6 +23,8 @@ Si el extractor parafrasea una cita, el único reintento interno recibe qué cam
 Después de reunir los datos básicos, la IA puede proponer una pregunta sobre un vacío concreto del relato. No hay árbol fijo por patología, no se supone un diagnóstico y no es obligatorio preguntar: cero es válido. El servidor limita el total a dos, una por vez, incluso si hay varias molestias. La detección de alarma conserva prioridad y no se generan preguntas adicionales después del límite de turnos.
 
 Generador y revisor reciben explícitamente que ninguna pregunta puede requerir una prueba, movimiento ni esfuerzo físico. Sólo puede responderse con lo que el paciente ya sabe, recuerda o notó espontáneamente, sin levantarse, examinarse ni comprobar nada, aunque parezca simple o indoloro.
+
+La pregunta sobre actividades es opcional y cuenta dentro del máximo de dos. Sólo se propone si aporta información aún desconocida y resulta pertinente al relato, con lenguaje neutral como «¿Hay alguna actividad habitual que esta molestia te dificulte?». Se omite la pregunta genérica ante menciones de discapacidad, silla de ruedas, cirugía reciente/posoperatorio, reposo indicado o limitaciones ya informadas. El filtro local es conservador y puede omitirla incluso ante menciones históricas; no registra ni infiere discapacidad, dependencia o falta de autonomía. El revisor aplica además `functionalImpactAppropriate`; ante dudas, se omite. Nunca usar «te inhabilita» ni pedir que el paciente pruebe una actividad.
 
 Antes de mostrar cada propuesta:
 
