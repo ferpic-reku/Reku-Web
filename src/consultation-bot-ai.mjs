@@ -159,14 +159,14 @@ export const nextConsultationStep = (data) => {
   if (data.urgent) return { key: "urgent", urgent: true, complete: false, text: "Gracias por contarnos. Por lo que describís, necesitás una evaluación médica presencial urgente. Acercate a una guardia; si no podés trasladarte o hay una emergencia, llamá al servicio de emergencias local. No esperes al turno de telerehabilitación. Dejamos tu relato resumido para que puedas descargarlo." };
   if (!data.complaints.length) return { key: "reason", text: "Contame qué molestia o lesión te trae a la consulta y en qué parte del cuerpo la sentís." };
   for (const [index, item] of data.complaints.entries()) {
-    const area = item.location ? ` (${item.location})` : "";
-    const question = (key, text) => ({ key: `${item.id || index}.${key}`, field: key, complaintId: item.id, text });
+    const question = (key, text) => ({ key: `${item.id || index}.${key}`, field: key, complaintId: item.id,
+      text: data.complaints.length > 1 && item.location ? `Sobre la molestia en ${item.location}: ${text}` : text });
     if (!hasValue(item.reason) || !hasValue(item.location)) return question("location", "¿En qué zona del cuerpo sentís la molestia y qué te pasa ahí?");
-    if (!item.locationClear) return question("detail", `Para ubicar mejor la molestia${area}, ¿en qué parte exacta la sentís?`);
-    if (item.sideRequired && !hasValue(item.side)) return question("side", `Esa molestia${area}, ¿es del lado izquierdo, derecho o de ambos lados?`);
-    if (!hasValue(item.onset)) return question("onset", `¿Desde hace cuánto sentís esta molestia${area}, o cuándo fue la lesión? Puede ser aproximado.`);
-    if (!hasValue(item.mechanism) || (item.mechanismClear === false && !unknownPainAccepted(item.mechanism))) return question("mechanism", `¿Qué estabas haciendo o qué pasó cuando empezó la molestia${area}? Si no lo recordás, podés decirlo.`);
-    if (item.pain === null && !unknownPainAccepted(item.painNote)) return question("pain", `Del 1 al 10, donde 10 es dolor insoportable, ¿cuánto te duele ahora${area}? Si ahora no tenés dolor, podés decir 0.`);
+    if (!item.locationClear) return question("detail", "Para ubicar mejor la molestia, ¿en qué parte exacta la sentís?");
+    if (item.sideRequired && !hasValue(item.side)) return question("side", "Esa molestia, ¿es del lado izquierdo, derecho o de ambos lados?");
+    if (!hasValue(item.onset)) return question("onset", "¿Desde hace cuánto sentís esta molestia, o cuándo fue la lesión? Puede ser aproximado.");
+    if (!hasValue(item.mechanism) || (item.mechanismClear === false && !unknownPainAccepted(item.mechanism))) return question("mechanism", "¿Qué estabas haciendo o qué pasó cuando empezó la molestia? Si no lo recordás, podés decirlo.");
+    if (item.pain === null && !unknownPainAccepted(item.painNote)) return question("pain", "Del 1 al 10, donde 10 es dolor insoportable, ¿cuánto te duele ahora? Si ahora no tenés dolor, podés decir 0.");
   }
   return { key: "complete", complete: true, text: "Gracias por contarnos lo que te pasa. Ya reunimos la información para tu consulta. Podés revisar y descargar el informe acá abajo. ¡Gracias por confiar en Reku, hasta pronto!" };
 };

@@ -30,6 +30,25 @@ const complete = () => ({
 test("a complete account ends immediately without asking optional questions", () => {
   assert.equal(nextConsultationStep(complete()).complete, true);
 });
+test("essential questions omit repeated parenthesized areas without changing captured data", () => {
+  for (const [field, missing] of [["detail", { locationClear: false }], ["side", { side: null }], ["onset", { onset: null }], ["mechanism", { mechanism: null }], ["pain", { pain: null }]]) {
+    const data = complete();
+    Object.assign(data.complaints[0], { location: "aductor", ...missing });
+    const before = structuredClone(data);
+    const step = nextConsultationStep(data);
+    assert.equal(step.field, field);
+    assert.doesNotMatch(step.text, /[()]|aductor/);
+    assert.deepEqual(data, before);
+  }
+});
+test("multiple complaints retain clear attribution without parenthetical labels", () => {
+  const data = complete();
+  data.complaints.push({ ...data.complaints[0], id: "second", location: "aductor", onset: null });
+  const step = nextConsultationStep(data);
+  assert.equal(step.complaintId, "second");
+  assert.match(step.text, /^Sobre la molestia en aductor: ¿Desde hace cuánto/);
+  assert.doesNotMatch(step.text, /[()]/);
+});
 test("an injury label alone requires its circumstances, but a known or declined cause does not", () => {
   const data = complete();
   Object.assign(data.complaints[0], { mechanism: "torcedura", mechanismClear: false });
