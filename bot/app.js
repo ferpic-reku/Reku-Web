@@ -5,6 +5,7 @@
   const suffix = query.has('form') ? `?form=${encodeURIComponent(query.get('form'))}` : '';
   let session = null;
   let busy = false;
+  let sendingMessage = false;
   let recorder = null;
   let stream = null;
   let recordTimer = null;
@@ -30,7 +31,7 @@
   const updateControls = () => {
     const recording = recorder?.state === 'recording';
     $('send').disabled = busy || recording || !$('message').value.trim();
-    $('message').disabled = busy || recording;
+    $('message').disabled = (busy && !sendingMessage) || recording;
     $('record').disabled = busy;
     $('start').disabled = busy || !available || !$('consent').checked;
     $('typing').hidden = !busy || !session;
@@ -110,15 +111,20 @@
     event.preventDefault();
     const text = $('message').value.trim();
     if (!text || busy || !session) return;
+    sendingMessage = true;
     setBusy(true); showError();
     if (!pendingMessage || pendingMessage.text !== text || pendingMessage.version !== session.version) pendingMessage = { text, requestId: crypto.randomUUID(), version: session.version, instanceId: session.instanceId };
     renderMessages([...session.messages, { role: 'user', text }]);
+    $('message').value = ''; clearAudio(); updateControls(); $('message').focus();
     try {
       session = (await api('message', pendingMessage)).session;
       pendingMessage = null;
-      $('message').value = ''; clearAudio(); render();
-    } catch (error) { renderMessages(session.messages); showError(error.message); }
-    finally { setBusy(false); }
+      render();
+    } catch (error) {
+      $('message').value = [text, $('message').value].filter(Boolean).join('\n\n');
+      renderMessages(session.messages); showError(error.message);
+    }
+    finally { sendingMessage = false; setBusy(false); }
   });
   const transcribe = async (file) => {
     if (file.size > 8 * 1024 * 1024) { showError('El audio debe pesar menos de 8 MB.'); return; }
