@@ -17,6 +17,11 @@ export const welcomeMessages = [
 const cookieName = "reku_consultation_bot";
 const ttl = 2 * 60 * 60 * 1000;
 const sessions = new Map();
+export const forgetConsultationSession = (store, token, host, instanceId) => {
+  const session = store.get(token);
+  if (!session || session.host !== host || (instanceId !== undefined && session.instanceId !== instanceId)) return false;
+  return store.delete(token);
+};
 let activeRequests = 0;
 const cleanSessions = () => {
   for (const [id, session] of sessions) if (session.expiresAt < Date.now()) sessions.delete(id);
@@ -61,9 +66,21 @@ export const handleConsultationBot = async (request, response, url) => {
     let session = sessions.get(token);
     if (session && (session.expiresAt < Date.now() || session.host !== request.headers.host)) session = null;
     if (request.method === "GET" && action === "session") {
-      if (!session) { sendJson(response, 200, { session: null }); return; }
-      const brand = await context(request, url);
-      sendJson(response, 200, { session: brand.slug === session.brand.slug ? present(session) : null });
+      // Visits never restore prior conversations, even with a legacy cookie.
+      sendJson(response, 200, { session: null });
+      return;
+    }
+    if (request.method === "POST" && action === "reset") {
+      forgetConsultationSession(sessions, token, request.headers.host);
+      sendJson(response, 200, { session: null }, { "Set-Cookie": `${cookieName}=; Path=/api/bot/; HttpOnly; SameSite=Strict; Max-Age=0${isProduction ? "; Secure" : ""}` });
+      return;
+    }
+    if (request.method === "POST" && action === "close") {
+      const body = JSON.parse(await readBody(request, 1000));
+      if (typeof body.instanceId !== "string" || !body.instanceId || body.instanceId.length > 100) throw fail("Conversación inválida.");
+      // A delayed pagehide from another tab must not delete a newer conversation.
+      forgetConsultationSession(sessions, token, request.headers.host, body.instanceId);
+      sendJson(response, 200, { session: null });
       return;
     }
     if (request.method === "POST" && action === "session") {
@@ -85,7 +102,7 @@ export const handleConsultationBot = async (request, response, url) => {
         messages: welcomeMessages.map((text) => ({ role: "assistant", text })),
       };
       sessions.set(id, session);
-      sendJson(response, 201, { session: present(session) }, { "Set-Cookie": `${cookieName}=${id}; Path=/api/bot/; HttpOnly; SameSite=Strict; Max-Age=7200${isProduction ? "; Secure" : ""}` });
+      sendJson(response, 201, { session: present(session) }, { "Set-Cookie": `${cookieName}=${id}; Path=/api/bot/; HttpOnly; SameSite=Strict${isProduction ? "; Secure" : ""}` });
       return;
     }
     if (!session) throw fail("La sesión terminó. Iniciá una nueva conversación.", 401);

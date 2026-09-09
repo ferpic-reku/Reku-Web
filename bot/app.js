@@ -14,6 +14,7 @@
   let discardRecording = false;
   let pendingMessage = null;
   let available = false;
+  let visitEnded = false;
   const welcome = [
     'Hola, bienvenido a Reku. Necesitamos que nos cuentes el motivo de tu consulta: si es una lesión o una dolencia que venís arrastrando, cómo empezó, en qué zona, cuánto te duele del 1 al 10 y desde hace cuánto tiempo.',
     'Podés escribirlo o, si te resulta más cómodo, mandar un audio.',
@@ -84,7 +85,11 @@
   $('consent').addEventListener('change', updateControls);
   $('start').addEventListener('click', async () => {
     setBusy(true); showError();
-    try { session = (await api('session', { consent: true })).session; render(); $('message').focus(); }
+    try {
+      const created = (await api('session', { consent: true })).session;
+      if (visitEnded) { closeSession(created); return; }
+      session = created; render(); $('message').focus();
+    }
     catch (error) { showError(error.message); }
     finally { setBusy(false); }
   });
@@ -100,12 +105,15 @@
     if (!fromAudio) $('message').value = '';
     updateControls(); $('message').focus();
     try {
-      session = (await api('message', pendingMessage)).session;
+      const updated = (await api('message', pendingMessage)).session;
+      if (visitEnded) return;
+      session = updated;
       const decisions = (session.followupDiagnostics || []).filter(item => item.turn === session.version);
       if (decisions.length) console.info('Reku: control de preguntas adicionales', { diagnosticId: session.diagnosticId, decisions });
       pendingMessage = null;
       render();
     } catch (error) {
+      if (visitEnded) return;
       if (!fromAudio) $('message').value = [text, $('message').value].filter(Boolean).join('\n\n');
       renderMessages(session.messages); showError(error.message);
       if (fromAudio) throw error;
@@ -131,9 +139,10 @@
         if (!text || text.length > 4000) throw new Error('No pudimos entender el audio. Probá grabar nuevamente.');
         audio.text = text;
       }
+      if (visitEnded) return;
       await sendMessage(audio.text, { fromAudio: true });
       clearAudio();
-    } catch (error) { showError(error.message); $('audio-retry').hidden = false; }
+    } catch (error) { if (!visitEnded) { showError(error.message); $('audio-retry').hidden = false; } }
     finally { setBusy(false); $('message').focus(); }
   };
   const closeAudioMeter = () => {
@@ -212,12 +221,32 @@
     } catch (error) { showError(error.message || 'No pudimos descargar el informe.'); }
     finally { $('download').disabled = false; }
   });
-  window.addEventListener('pagehide', () => { stopRecording(true); clearAudio(); });
+  const closeSession = (current) => {
+    if (!current?.instanceId) return;
+    const body = JSON.stringify({ instanceId: current.instanceId });
+    try {
+      if (navigator.sendBeacon?.('/api/bot/close', new Blob([body], { type: 'application/json' }))) return;
+      fetch('/api/bot/close', { method: 'POST', credentials: 'same-origin', keepalive: true, headers: { 'Content-Type': 'application/json' }, body }).catch(() => {});
+    } catch { /* On abrupt exit, the next visit resets it; TTL is a final fallback. */ }
+  };
+  window.addEventListener('pagehide', () => {
+    visitEnded = true;
+    available = false;
+    closeSession(session);
+    stopRecording(true); clearAudio(); pendingMessage = null; session = null;
+    $('message').value = ''; $('consent').checked = false;
+    render();
+  });
+  window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
   const init = async () => {
     render();
     try {
-      const context = await api('context'); available = context.available; brandPage(context.brand);
-      session = (await api('session')).session; render();
+      await api('reset', {});
+      if (visitEnded) return;
+      const context = await api('context');
+      if (visitEnded) return;
+      available = context.available; brandPage(context.brand);
+      session = null; $('message').value = ''; $('consent').checked = false; render();
       if (!available) showError('El asistente todavía no está disponible.');
     } catch (error) { showError(error.message || 'No pudimos iniciar el asistente. Recargá la página.'); }
   };

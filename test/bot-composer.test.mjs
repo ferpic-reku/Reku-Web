@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import vm from 'node:vm';
 
-const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {} } = {}) => {
+const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {}, autoStart = true, resetFails = false } = {}) => {
   let focused;
   const element = tagName => ({
     tagName, children: [],
@@ -24,6 +24,9 @@ const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {} } =
   const urls = [];
   const audioRequests = [];
   const diagnostics = [];
+  const windowHandlers = {};
+  const beacons = [];
+  let reloads = 0;
   const timers = new Map();
   let timerId = 0;
   class AudioContext {
@@ -46,8 +49,8 @@ const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {} } =
   const response = (data, ok = true) => ({ ok, json: async () => data });
   vm.runInNewContext(await readFile(new URL('../bot/app.js', import.meta.url), 'utf8'), {
     document: { getElementById: get, createElement: element, createTextNode: text => text, body: element() },
-    location: { search }, window: { addEventListener() {}, AudioContext, MediaRecorder },
-    navigator: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } },
+    location: { search, reload: () => reloads++ }, window: { addEventListener: (event, fn) => { windowHandlers[event] = fn; }, AudioContext, MediaRecorder },
+    navigator: { sendBeacon: (url, body) => { beacons.push({ url, body }); return true; }, mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } },
     MediaRecorder, File, Blob,
     console: { info: (...args) => diagnostics.push(args) },
     setInterval: (callback, ms) => { timers.set(++timerId, { callback, ms }); return timerId; },
@@ -55,8 +58,9 @@ const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {} } =
     URLSearchParams, URL, FormData, AbortSignal, crypto: { randomUUID },
     fetch: async (url, options) => {
       urls.push(url);
+      if (url.endsWith('/reset')) { assert.equal(options.method, 'POST'); return response(resetFails ? { error: 'Reset failed' } : { session: null }, !resetFails); }
       if (url.endsWith('/context')) return response({ available: true, brand: session.brand });
-      if (url.endsWith('/session')) return response({ session });
+      if (url.endsWith('/session')) { assert.equal(options.method, 'POST', 'Never restore a previous session'); return response({ session }); }
       if (url.endsWith('/transcribe')) {
         audioRequests.push(options.body);
         return response({ text: 'Me duele la rodilla derecha' });
@@ -66,10 +70,11 @@ const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {} } =
     },
   });
   await new Promise(resolve => setImmediate(resolve));
+  if (autoStart && !resetFails) await get('start').handlers.click();
   const submit = () => get('composer').handlers.submit({ preventDefault() {} });
   get('composer').requestSubmit = submit;
   return {
-    get, submit, requests, urls, audioRequests, diagnostics, focused: () => focused,
+    get, submit, requests, urls, audioRequests, diagnostics, windowHandlers, beacons, reloads: () => reloads, focused: () => focused,
     sampleAudio: () => { for (const timer of timers.values()) if (timer.ms === 50) for (let i = 0; i < 6; i++) timer.callback(); },
     finish: (ok = true, overrides = {}) => resolveRequest(response(ok ? { session: { ...session, version: 1, ...overrides } } : { error: 'Error de prueba' }, ok)),
   };
@@ -85,6 +90,48 @@ for (const status of ['complete', 'partial', 'urgent']) test('finished ' + statu
   assert.equal(app.get('summary').children.length, 0);
   assert.equal(app.get('messages').children.length, 1);
   assert.equal(data.followups[0].answer, 'Me cuesta caminar');
+});
+test('each visit resets before starting and never restores a finished conversation', async () => {
+  const app = await setup({ autoStart: false, sessionOverrides: { status: 'complete', messages: [{ role: 'user', text: 'Conversación anterior' }] } });
+  assert.deepEqual(app.urls, ['/api/bot/reset', '/api/bot/context']);
+  assert.equal(app.get('start-panel').hidden, false);
+  assert.equal(app.get('result').hidden, true);
+  assert.equal(app.get('composer').hidden, true);
+  assert.equal(app.get('message').value, '');
+  assert.equal(app.get('consent').checked, false);
+  assert.equal(app.get('messages').children.length, 2);
+  assert.ok(!JSON.stringify(app.get('messages').children).includes('Conversación anterior'));
+});
+test('a failed reset cannot expose or start an old conversation', async () => {
+  const app = await setup({ autoStart: false, resetFails: true });
+  assert.deepEqual(app.urls, ['/api/bot/reset']);
+  assert.equal(app.get('start').disabled, true);
+  assert.equal(app.get('error').textContent, 'Reset failed');
+});
+test('leaving clears the visible draft and closes only that conversation; back cache reloads', async () => {
+  const app = await setup();
+  app.get('message').value = 'Borrador privado';
+  app.windowHandlers.pagehide();
+  assert.equal(app.get('message').value, '');
+  assert.equal(app.get('result').hidden, true);
+  assert.equal(app.beacons.length, 1);
+  assert.equal(app.beacons[0].url, '/api/bot/close');
+  assert.deepEqual(JSON.parse(await app.beacons[0].body.text()), { instanceId: 'test-instance' });
+  app.windowHandlers.pageshow({ persisted: false });
+  assert.equal(app.reloads(), 0);
+  app.windowHandlers.pageshow({ persisted: true });
+  assert.equal(app.reloads(), 1);
+});
+test('a pending message cannot bring back private content after leaving', async () => {
+  const app = await setup();
+  app.get('message').value = 'Relato privado';
+  const pending = app.submit();
+  app.windowHandlers.pagehide();
+  app.finish(true, { messages: [{ role: 'user', text: 'Relato privado' }] });
+  await pending;
+  assert.equal(app.get('message').value, '');
+  assert.equal(app.get('composer').hidden, true);
+  assert.ok(!JSON.stringify(app.get('messages').children).includes('Relato privado'));
 });
 test('result markup contains only the title and download button', async () => {
   const html = await readFile(new URL('../bot/index.html', import.meta.url), 'utf8');

@@ -36,7 +36,7 @@ async function structured(instructions, input, schema, name, { fetchImpl, settin
     body: JSON.stringify({ model: settings.model, store: false, temperature: 0, max_output_tokens: 1100,
       instructions, input: [{ role: "user", content: JSON.stringify(input) }],
       text: { format: { type: "json_schema", name, strict: true, schema } },
-    }), signal: AbortSignal.timeout(15_000),
+    }), signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) throw new Error("BOT_FOLLOWUP_PROVIDER");
   const body = await response.json();
