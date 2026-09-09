@@ -22,6 +22,8 @@ Antes de mostrar cada propuesta:
 
 Las comparaciones del filtro normalizan Unicode y tildes, sin quitar las tildes del texto que ve el paciente. No usan límites de palabra ASCII después de letras acentuadas. «¿Qué actividad te cuesta hacer?» es una observación admitida, no una excepción para pedir movimientos. Pedidos como «probá», «fijate» o preguntas condicionales que requieren levantar/doblar una parte del cuerpo siguen bloqueados. Los duplicados se detectan también con diferencias de tildes, mayúsculas y puntuación.
 
+Las preguntas adicionales tampoco vuelven a narrar el mecanismo de lesión: se ubican por la zona y preguntan lo que el paciente ya notó. Se bloquean cláusulas causales como «desde que…» o «tras…». Este control se agregó al observar que el modelo podía reformular «tirón» incorrectamente como «te tiraste».
+
 La revisión es una barrera de reducción de riesgo, no una garantía de criterio clínico. Un ensayo adversarial mostró variabilidad del modelo ante solicitudes de pruebas físicas; por eso se agregaron bloqueos deterministas además del revisor. No debe reemplazar evaluación ni supervisión profesional.
 
 Se conservan pregunta, molestia y respuesta textual en el resumen y el PDF. No se guarda ni muestra una hipótesis diagnóstica del generador. Las instrucciones del paciente y el contenido candidato se tratan como datos, no como órdenes del sistema. Las llamadas usan `store: false`; no se escriben conversaciones, respuestas del proveedor ni credenciales en los logs.
