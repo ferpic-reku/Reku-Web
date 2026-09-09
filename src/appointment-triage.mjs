@@ -32,10 +32,12 @@ export const ensureAppointmentTriage = async (
           a.id,
           a.triage_url,
           a.patient_name,
+          COALESCE(NULLIF(a.agreement_slug_snapshot, ''), agreement.slug, '') AS agreement_slug,
           pi.nombre AS intake_first_name,
           pi.apellido AS intake_family_name
         FROM appointments a
         LEFT JOIN patient_intakes pi ON pi.id = a.patient_intake_id
+        LEFT JOIN agreements agreement ON agreement.id = a.agreement_id
         WHERE a.id = $1
           AND a.status = 'confirmed'
           AND ($2::bigint IS NULL OR a.booking_access_link_id = $2)
@@ -55,6 +57,7 @@ export const ensureAppointmentTriage = async (
         name: appointment.intake_first_name || fallback.name,
         familyName: appointment.intake_family_name || fallback.familyName,
         patientExternalId: `REKU-APT-${String(appointment.id).padStart(6, "0")}`,
+        centro: appointment.agreement_slug,
       });
       await client.query(
         `
@@ -101,4 +104,3 @@ export const ensureAppointmentTriage = async (
   }
   return result;
 };
-

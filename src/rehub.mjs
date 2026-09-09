@@ -98,6 +98,7 @@ export const requestPatientTriage = async ({
   name,
   familyName,
   patientExternalId,
+  centro,
   lang = config.rehubTriageLang,
   baseUrl = config.rehubBaseUrl,
   clientId = config.rehubClientId,
@@ -111,12 +112,16 @@ export const requestPatientTriage = async ({
   if (!patientExternalId) {
     throw new TypeError("patientExternalId is required");
   }
+  if (!String(centro || "").trim()) {
+    throw new TypeError("centro is required");
+  }
 
   const data = Object.fromEntries(
     Object.entries({
       name: String(name || "").trim(),
       familyName: String(familyName || "").trim(),
       patientExternalId: String(patientExternalId).trim(),
+      centro: String(centro || "").trim(),
       lang: String(lang || "").trim(),
     }).filter(([, value]) => value),
   );
