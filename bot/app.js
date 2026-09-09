@@ -34,6 +34,7 @@
   const updateControls = () => {
     const recording = recorder?.state === 'recording';
     $('cancel-recording').hidden = !recording;
+    $('send').hidden = Boolean(recording);
     $('send').disabled = busy || recording || !$('message').value.trim();
     $('message').disabled = (busy && !sendingMessage) || recording;
     $('record').disabled = busy;

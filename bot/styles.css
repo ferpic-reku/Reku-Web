@@ -1,6 +1,7 @@
 :root{color-scheme:light;--navy:#18213f;--muted:#64738a;--teal:#328c99;--border:#dde6ee;--soft:#f5f7fb;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--navy);background:var(--soft)}
 .chat-card{padding-bottom:24px}
 #message{resize:none}
+.recording-help{margin-top:6px}
 #cancel-recording{margin-left:8px;align-self:center;min-height:42px;color:#a33232;font-size:11px}
 #record{background:#e0f3e8;color:#236747;border:1px solid #b8dfc9;border-radius:10px;padding:10px 12px}
 #record:not(:disabled):hover{background:#cdebd9}

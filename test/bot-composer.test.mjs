@@ -18,6 +18,7 @@ test('recording cancellation sits beside audio send and the textbox cannot be re
   assert.match(actions, /id="record"[\s\S]*id="cancel-recording"/);
   assert.match(css, /#message\{resize:none\}/);
   assert.equal((html.match(/id="cancel-recording"/g) || []).length, 1);
+  assert.match(html, /class="recording-timer">Grabando <strong id="timer">0:00<\/strong><\/div>\s*<div class="recording-help">Tocá Enviar/);
 });
 
 const setup = async ({ audioLevel = 0.02, search = '', hash = '', sessionOverrides = {}, autoStart = true, resetFails = false, transcription = 'Me duele la rodilla derecha', transcriptionFailures = 0, access = { allowed: true } } = {}) => {
@@ -235,13 +236,16 @@ test('recording sends its transcription directly without changing the typed draf
   const input = app.get('message');
   input.value = 'Borrador que todavía no envié';
   assert.equal(app.get('cancel-recording').hidden, true);
+  assert.equal(app.get('send').hidden, false);
   await app.get('record').handlers.click();
   assert.equal(app.get('record-label').textContent, 'Enviar');
   assert.equal(app.get('cancel-recording').hidden, false);
+  assert.equal(app.get('send').hidden, true);
   app.sampleAudio();
   await app.get('record').handlers.click();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(app.get('cancel-recording').hidden, true);
+  assert.equal(app.get('send').hidden, false);
   assert.equal(app.audioRequests.length, 1);
   assert.equal(app.requests.length, 1);
   assert.equal(app.requests[0].text, 'Me duele la rodilla derecha');
@@ -259,11 +263,13 @@ test('four-minute limit sends the captured audio and its full long transcription
   app.sampleAudio();
   app.tickRecording(239000);
   assert.equal(app.get('timer').textContent, '3:59');
+  assert.equal(app.get('send').hidden, true);
   assert.equal(app.audioRequests.length, 0);
   app.tickRecording(1000);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(app.audioRequests.length, 1);
   assert.equal(await app.audioRequests[0].get('audio').text(), 'fake-audio');
+  assert.equal(app.get('send').hidden, false);
   assert.equal(app.requests[0].text, transcription.trim());
   assert.equal(app.get('message').value, '');
   app.tickRecording(10000);
@@ -308,6 +314,7 @@ test('cancelled recordings never transcribe or send', async () => {
   app.sampleAudio();
   app.get('cancel-recording').handlers.click();
   await new Promise(resolve => setImmediate(resolve));
+  assert.equal(app.get('send').hidden, false);
   assert.equal(app.audioRequests.length, 0);
   assert.equal(app.requests.length, 0);
 });
