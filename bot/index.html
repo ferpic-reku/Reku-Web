@@ -31,6 +31,11 @@
         </section>
         <p id="access-notice" class="result" role="status" hidden></p>
       </aside>
+      <section id="completed-report" class="result" aria-label="Informe de tu consulta" hidden>
+        <h2>Tu informe está listo</h2>
+        <p id="completed-report-message"></p>
+        <button id="download-completed" class="primary" type="button">Descargar informe PDF <span aria-hidden="true">↓</span></button>
+      </section>
       <section id="chat-card" class="chat-card" aria-label="Entrevista sobre tu motivo de consulta" hidden>
         <div class="chat-header"><div class="assistant-avatar" aria-hidden="true">r<span>·</span></div><div><h2>Asistente Reku</h2><p id="chat-status">Te acompañamos antes de la consulta</p></div><span class="ai-label">IA</span></div>
         <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions"></div>
@@ -50,6 +55,7 @@
             <div class="recording-help">Tocá Enviar para transcribir y enviar tu audio. Al llegar a 4 minutos se envía automáticamente lo grabado.</div>
           </div>
           <div id="audio-retry" class="audio-review" hidden><button id="retry-audio" type="button" class="text-button">Reintentar envío del audio</button> · <button id="discard-audio" type="button" class="text-button">Descartar audio</button></div>
+          <div id="message-retry" class="audio-review" hidden><p>Tu mensaje anterior sigue pendiente de confirmación. Tu próximo borrador se conserva mientras reintentás.</p><button id="retry-message" type="button" class="text-button">Reintentar mensaje anterior</button></div>
           <small class="composer-hint">Enter para enviar · Shift + Enter para una nueva línea</small>
         </form>
         <div id="result" class="result" hidden>

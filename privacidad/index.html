@@ -29,12 +29,12 @@
       <article class="legal-article">
         <p class="eyebrow">Información legal</p>
         <h1>Política de Privacidad</h1>
-        <p class="updated">Última actualización: 28 de agosto de 2026.</p>
+        <p class="updated">Última actualización: 9 de septiembre de 2026.</p>
         <p class="lead">
           Esta política explica cómo Reku recopila, utiliza, conserva y comparte
           datos personales al operar su sitio web, sus portales de gestión, su
           sistema de turnos y la integración opcional con Google Calendar y
-          Google Meet.
+          Google Meet, y su asistente de entrevista previa.
         </p>
 
         <section class="legal-section" id="responsable">
@@ -97,6 +97,44 @@
               accede al contenido personal del teléfono.
             </li>
           </ul>
+        </section>
+
+        <section class="legal-section" id="asistente">
+          <h2>Asistente de entrevista previa</h2>
+          <p>
+            Con tu aceptación, enviamos a la API de OpenAI el texto que escribís,
+            los audios que elegís grabar y el contexto de la conversación para
+            transcribirlos, hacer aclaraciones pertinentes y organizar un informe.
+            El relato puede contener información sobre tu salud. El asistente
+            solo organiza lo que contás: no diagnostica ni indica tratamientos.
+            No enviamos datos de Google Calendar ni de Google Meet a OpenAI.
+          </p>
+          <p>
+            En el modo de prueba, Reku no guarda un historial entre visitas ni
+            persiste audios o relatos en su base de datos. La conversación se
+            procesa temporalmente en memoria; al salir se solicita su eliminación
+            y cualquier memoria residual se elimina en aproximadamente dos horas.
+            Si el asistente está vinculado a un turno, se conserva el informe final
+            cifrado y un registro de uso para evitar entrevistas duplicadas; no se
+            conservan los audios ni el historial del chat. El acceso al informe
+            requiere el enlace privado vigente del turno y no es público.
+          </p>
+          <p>
+            Solicitamos que OpenAI no almacene las respuestas como historial de la
+            aplicación mediante la opción <code>store: false</code>. Esto no
+            equivale a retención cero: para el procesamiento de texto, OpenAI puede
+            conservar registros de control de abuso hasta 30 días, con las
+            excepciones indicadas en su documentación. La API de transcripción de
+            audio tiene un régimen de retención distinto. Los datos de la API no
+            se usan para entrenamiento por defecto. Podés consultar los
+            <a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">controles de datos de OpenAI</a>.
+          </p>
+          <p>
+            Evitá incluir información identificatoria o de otras personas que no
+            sea necesaria para explicar tu consulta. Para consultas sobre el
+            tratamiento de tus datos o solicitar su rectificación o eliminación,
+            escribí a <a href="mailto:hola@reku.io">hola@reku.io</a>.
+          </p>
         </section>
 
         <section class="legal-section" id="google">
@@ -245,6 +283,7 @@
               los avisos que éste activó;
             </li>
             <li>Mercado Pago, para procesar pagos y devoluciones;</li>
+            <li>OpenAI, para procesar los relatos y transcribir los audios que se envían al asistente con aceptación previa, según lo explicado en esta política;</li>
             <li>proveedores de email, hosting, infraestructura, seguridad y soporte;</li>
             <li>
               plataformas clínicas integradas, como ReHub/DyCare, cuando formen

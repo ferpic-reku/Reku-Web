@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mergeConsultationData, advanceConsultation } from "../src/consultation-bot-conversation.mjs";
+import { fallbackConsultationNarrative } from "../src/consultation-bot-narrative.mjs";
 
 const complaint = (id = "c1", overrides = {}) => ({ id, reason: "tirón", location: "muslo derecho", locationClear: true,
   sideRequired: true, side: "derecha", onset: "ayer", mechanism: "jugando al fútbol", pain: 4, painNote: null,
@@ -143,4 +144,111 @@ test("provider extraction failures do not mutate the session", async () => {
   const before = structuredClone(session);
   await assert.rejects(advanceConsultation(session, msgs("hola"), { analyze: async () => { throw new Error("failure"); } }));
   assert.deepEqual(session, before);
+});
+
+test("global corrections remove withdrawn care and goals and cannot revive stale history", () => {
+  const previous = { ...state(), priorCare: "Cirugía hace dos meses", goal: "Volver a correr",
+    globalEvidence: { priorCare: "me operaron", goal: "quiero correr" } };
+  const text = "Nunca me operaron y no quiero correr, lo entendiste mal";
+  const extracted = { ...state([]), corrections: [
+    { complaintId: null, field: "priorCare", evidence: "Nunca me operaron" },
+    { complaintId: null, field: "goal", evidence: "no quiero correr" },
+  ], lastAnswer: { status: "correction", value: null, evidence: text } };
+  const data = mergeConsultationData(previous, extracted, text, { field: "pain", complaintId: "c1" });
+  assert.equal(data.priorCare, null);
+  assert.equal(data.goal, null);
+  assert.deepEqual(data.invalidatedGlobalFields, ["priorCare", "goal"]);
+  assert.doesNotMatch(fallbackConsultationNarrative(data), /Cirugía|correr/);
+  const stale = mergeConsultationData(data, previous, "4", { field: "pain", complaintId: "c1" });
+  assert.equal(stale.priorCare, null);
+  assert.equal(stale.goal, null);
+  assert.equal(stale.complaints[0].pain, 4);
+});
+
+test("a grounded replacement of a global fact wins but absent and forged corrections do not", () => {
+  const previous = { ...state(), priorCare: "Cirugía", goal: "Correr", globalEvidence: { priorCare: "me operaron", goal: "correr" } };
+  const text = "No era cirugía, solamente hice fisioterapia";
+  const replaced = mergeConsultationData(previous, { ...state([]), priorCare: "Fisioterapia",
+    globalEvidence: { priorCare: "hice fisioterapia", goal: null },
+    corrections: [{ complaintId: null, field: "priorCare", evidence: text }] }, text, null);
+  assert.equal(replaced.priorCare, "Fisioterapia");
+  assert.equal(replaced.goal, "Correr");
+  const unchanged = mergeConsultationData(replaced, { ...state([]), corrections: [
+    { complaintId: null, field: "priorCare", evidence: "Nunca hice nada" },
+    { complaintId: "c1", field: "goal", evidence: "hola" },
+  ] }, "hola", null);
+  assert.equal(unchanged.priorCare, "Fisioterapia");
+  assert.equal(unchanged.goal, "Correr");
+  assert.equal(unchanged.corrections.length, 0);
+});
+
+test("declining anatomical detail preserves the known region and records its uncertainty", async () => {
+  const previous = state([complaint("c1", { location: "pierna", locationClear: false })]);
+  const extracted = { ...state([complaint("c1", { location: "No informado: no puede precisar", locationClear: true,
+    evidence: { location: "No puedo precisar mejor" } })]),
+    lastAnswer: { status: "answered", value: "No informado: no puede precisar", evidence: "No puedo precisar mejor" } };
+  const turn = await advanceConsultation({ data: previous, version: 1, lastQuestion: { field: "detail", complaintId: "c1" } }, msgs("No puedo precisar mejor"), {
+    analyze: async () => extracted, chooseFollowup: async () => null,
+  });
+  assert.equal(turn.data.complaints[0].location, "pierna");
+  assert.equal(turn.data.complaints[0].locationNote, "No informado: no puede precisar");
+  assert.equal(turn.data.complaints[0].locationClear, true);
+  assert.equal(turn.next.complete, true);
+  assert.match(fallbackConsultationNarrative(turn.data), /pierna/);
+  assert.match(fallbackConsultationNarrative(turn.data), /no puede precisar/);
+});
+
+test("richer anatomical extraction survives a short lastAnswer and retains its evidence", () => {
+  const previous = state([complaint("c1", { location: "muslo", locationClear: false })]);
+  const extracted = { ...state([complaint("c1", { location: "parte interna del muslo derecho", locationClear: true,
+    evidence: { location: "en la parte interna" } })]), lastAnswer: { status: "answered", value: "interna", evidence: "interna" } };
+  const data = mergeConsultationData(previous, extracted, "en la parte interna", { field: "detail", complaintId: "c1" });
+  assert.equal(data.complaints[0].location, "parte interna del muslo derecho");
+  assert.equal(data.complaints[0].evidence.location, "en la parte interna");
+  const omitted = mergeConsultationData(previous, { ...state([]), lastAnswer: extracted.lastAnswer }, "interna", { field: "detail", complaintId: "c1" });
+  assert.equal(omitted.complaints[0].location, "muslo; interna");
+});
+
+for (const field of ["onset", "followup"]) test(`repeated ${field} clarifications never recursively repeat previous wrappers`, async () => {
+  const question = "¿Desde hace cuánto lo notás?";
+  let session = { data: state(), version: 1, lastQuestion: { field, complaintId: "c1", text: question } };
+  let stableText;
+  for (let index = 0; index < 4; index++) {
+    const turn = await advanceConsultation(session, msgs("mmm"), {
+      analyze: async () => ({ ...state([]), lastAnswer: { status: "unclear", value: null, evidence: "mmm" } }),
+    });
+    assert.equal(turn.next.baseText, question);
+    assert.equal(turn.next.text.split("No me quedó clara tu respuesta.").length, 2);
+    if (stableText) assert.equal(turn.next.text, stableText);
+    stableText = turn.next.text;
+    session = { ...session, data: turn.data, lastQuestion: turn.next };
+  }
+});
+
+test("extraction and followups receive one shared 20 second deadline", async t => {
+  const controller = new AbortController();
+  const timeouts = [];
+  const signals = [];
+  t.mock.method(AbortSignal, "timeout", ms => { timeouts.push(ms); return controller.signal; });
+  const result = await advanceConsultation({ data: state(), version: 1 }, msgs("ok"), {
+    analyze: async (_messages, { signal }) => { signals.push(signal); return state([]); },
+    chooseFollowup: async (_data, _messages, { signal }) => { signals.push(signal); return null; },
+  });
+  assert.deepEqual(timeouts, [20_000]);
+  assert.equal(signals[0], signals[1]);
+  assert.equal(result.next.complete, true);
+});
+
+test("cancellation cannot commit an extraction or followup result after disconnection", async () => {
+  for (const stage of ["analysis", "followup"]) {
+    const controller = new AbortController();
+    const session = { data: state(), version: 1 };
+    const before = structuredClone(session);
+    await assert.rejects(advanceConsultation(session, msgs("ok"), {
+      signal: controller.signal,
+      analyze: async () => { if (stage === "analysis") controller.abort(); return state([]); },
+      chooseFollowup: async () => { controller.abort(); return null; },
+    }), error => error.name === "AbortError");
+    assert.deepEqual(session, before);
+  }
 });

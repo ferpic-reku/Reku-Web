@@ -4,40 +4,48 @@
   let session = null;
   let busy = false;
   let sendingMessage = false;
-  let recorder = null;
-  let stream = null;
-  let recordTimer = null;
+  let recordingAttempt = null;
   let pendingAudio = null;
-  let audioContext = null;
-  let voiceTimer = null;
-  let audibleSamples = 0;
-  let discardRecording = false;
   let pendingMessage = null;
+  let pendingMessageIsAudio = false;
+  let messageNeedsRetry = false;
   let available = false;
   let visitEnded = false;
   let accessMessage = '';
+  let completedReportAvailable = false;
   let welcoming = false;
   let welcomeTimer = null;
   const showError = (message = '') => { $('error').textContent = message; $('error').hidden = !message; };
   const api = async (path, body) => {
-    const response = await fetch(`/api/bot/${path}`, {
-      credentials: 'same-origin', cache: 'no-store',
-      ...(body ? { method: 'POST', body: body instanceof FormData ? body : JSON.stringify(body), headers: body instanceof FormData ? {} : { 'Content-Type': 'application/json' } } : {}),
-      signal: AbortSignal.timeout(125_000),
-    });
+    let response;
+    try {
+      response = await fetch(`/api/bot/${path}`, {
+        credentials: 'same-origin', cache: 'no-store',
+        ...(body ? { method: 'POST', body: body instanceof FormData ? body : JSON.stringify(body), headers: body instanceof FormData ? {} : { 'Content-Type': 'application/json' } } : {}),
+        // The message endpoint has one shared 20-second AI budget. Audio also
+        // needs time to upload (up to four minutes of recording).
+        signal: AbortSignal.timeout(path === 'transcribe' ? 100_000 : 30_000),
+      });
+    } catch {
+      throw new Error('No pudimos confirmar la respuesta del asistente. Revisá tu conexión e intentá de nuevo.');
+    }
     const data = await response.json().catch(() => { throw new Error('No pudimos conectar con el asistente. Intentá de nuevo en unos segundos.'); });
     if (!response.ok) throw new Error(data.error || 'No pudimos completar la solicitud. Intentá de nuevo.');
     return data;
   };
   const updateControls = () => {
-    const recording = recorder?.state === 'recording';
-    $('cancel-recording').hidden = !recording;
-    $('send').hidden = Boolean(recording);
-    $('send').disabled = busy || welcoming || recording || !$('message').value.trim();
-    $('message').disabled = (busy && !sendingMessage) || welcoming || recording;
-    $('record').disabled = busy || welcoming;
-    $('retry-audio').disabled = busy || recording;
-    $('discard-audio').disabled = busy || recording;
+    const capturing = Boolean(recordingAttempt);
+    $('cancel-recording').hidden = !capturing;
+    $('send').hidden = capturing;
+    $('send').disabled = busy || welcoming || capturing || Boolean(pendingMessage || pendingAudio) || !$('message').value.trim();
+    $('message').disabled = (busy && !sendingMessage) || welcoming || capturing;
+    $('record').disabled = busy || welcoming || Boolean(recordingAttempt?.starting || recordingAttempt?.stopping) || Boolean(pendingMessage || pendingAudio);
+    $('retry-audio').disabled = busy || capturing;
+    // Once its message may have reached the server, discarding cannot safely
+    // reset the request/version. Reconcile it with the same id first.
+    $('discard-audio').disabled = busy || capturing || Boolean(pendingMessage && pendingMessageIsAudio);
+    $('message-retry').hidden = !messageNeedsRetry || pendingMessageIsAudio;
+    $('retry-message').disabled = busy || capturing;
     $('start').disabled = busy || Boolean(session) || !available || !$('consent').checked;
     $('typing').hidden = !busy || !session;
   };
@@ -67,7 +75,9 @@
     $('access-notice').textContent = accessMessage;
     $('messages').hidden = Boolean(accessMessage);
     $('chat-card').hidden = !session || Boolean(accessMessage);
-    $('intro').hidden = Boolean(session) && !accessMessage;
+    $('intro').hidden = (Boolean(session) && !accessMessage) || completedReportAvailable;
+    $('completed-report').hidden = !completedReportAvailable;
+    $('completed-report-message').textContent = completedReportAvailable ? accessMessage : '';
     $('layout').classList.toggle('awaiting-start', !session);
     const messages = session?.messages || [];
     renderMessages(welcoming ? messages.slice(0, 1) : messages);
@@ -114,38 +124,53 @@
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (!$('send').disabled) $('composer').requestSubmit(); }
   });
   const sendMessage = async (text, { fromAudio = false } = {}) => {
+    if (!session || visitEnded) return;
+    const isNew = !pendingMessage;
+    if (isNew) {
+      pendingMessage = Object.freeze({ text, requestId: crypto.randomUUID(), version: session.version, instanceId: session.instanceId });
+      pendingMessageIsAudio = fromAudio;
+    }
+    const request = pendingMessage;
+    const audioMessage = pendingMessageIsAudio;
+    messageNeedsRetry = false;
     sendingMessage = true;
     setBusy(true); showError();
-    if (!pendingMessage || pendingMessage.text !== text || pendingMessage.version !== session.version) pendingMessage = { text, requestId: crypto.randomUUID(), version: session.version, instanceId: session.instanceId };
-    renderMessages([...session.messages, { role: 'user', text }]);
-    if (!fromAudio) $('message').value = '';
+    renderMessages([...session.messages, { role: 'user', text: request.text }]);
+    if (isNew && !audioMessage) $('message').value = '';
     updateControls(); $('message').focus();
     try {
-      const updated = (await api('message', pendingMessage)).session;
+      const updated = (await api('message', request)).session;
       if (visitEnded) return;
       session = updated;
       const decisions = (session.followupDiagnostics || []).filter(item => item.turn === session.version);
       if (decisions.length) console.info('Reku: control de preguntas adicionales', { diagnosticId: session.diagnosticId, decisions });
       pendingMessage = null;
+      pendingMessageIsAudio = false;
       render();
     } catch (error) {
       if (visitEnded) return;
-      if (!fromAudio) $('message').value = [text, $('message').value].filter(Boolean).join('\n\n');
-      renderMessages(session.messages); showError(error.message);
-      if (fromAudio) throw error;
+      messageNeedsRetry = true;
+      // Keep the uncertain send immutable and separate from the next draft.
+      // A retry may recover an already-committed response from the server.
+      renderMessages([...session.messages, { role: 'user', text: request.text }]); showError(error.message);
+      if (audioMessage) throw error;
     }
-    finally { sendingMessage = false; setBusy(false); }
+    finally { sendingMessage = false; setBusy(false); if (!visitEnded) $('message').focus(); }
   };
   $('composer').addEventListener('submit', async (event) => {
     event.preventDefault();
     const text = $('message').value.trim();
-    if (!text || busy || welcoming || !session) return;
+    if (!text || busy || welcoming || recordingAttempt || pendingMessage || pendingAudio || !session) return;
     await sendMessage(text);
   });
+  $('retry-message').addEventListener('click', async () => {
+    if (busy || recordingAttempt || !pendingMessage || pendingMessageIsAudio || !messageNeedsRetry) return;
+    await sendMessage(pendingMessage.text);
+  });
   const sendAudio = async () => {
-    if (!pendingAudio || busy || recorder?.state === 'recording' || !session) return;
+    if (!pendingAudio || busy || recordingAttempt || !session || (pendingMessage && !pendingMessageIsAudio)) return;
     const audio = pendingAudio;
-    if (audio.file.size > 8 * 1024 * 1024) { showError('El audio debe pesar menos de 8 MB.'); return; }
+    if (audio.file.size > 8 * 1024 * 1024) { showError('El audio debe pesar menos de 8 MB.'); $('audio-retry').hidden = false; updateControls(); return; }
     setBusy(true); showError(); $('audio-retry').hidden = true;
     try {
       if (!audio.text) {
@@ -159,60 +184,92 @@
       await sendMessage(audio.text, { fromAudio: true });
       clearAudio();
     } catch (error) { if (!visitEnded) { showError(error.message); $('audio-retry').hidden = false; } }
-    finally { setBusy(false); $('message').focus(); }
+    finally { setBusy(false); if (!visitEnded) $('message').focus(); }
   };
-  const closeAudioMeter = () => {
-    clearInterval(voiceTimer);
-    audioContext?.close().catch(() => {}); audioContext = null;
+  const releaseRecordingResources = (attempt) => {
+    clearInterval(attempt.voiceTimer); clearInterval(attempt.recordTimer);
+    attempt.stream?.getTracks().forEach(track => track.stop());
+    attempt.stream = null;
+    attempt.context?.close().catch(() => {}); attempt.context = null;
   };
-  const stopRecording = (discard = false) => {
-    discardRecording = discard;
-    if (recorder?.state === 'recording') { setBusy(true); recorder.stop(); }
-    stream?.getTracks().forEach(track => track.stop());
-    closeAudioMeter();
-    clearInterval(recordTimer); $('recording-note').hidden = true;
+  const resetRecordingControls = () => {
+    $('recording-note').hidden = true;
     $('record-label').textContent = 'Grabar audio'; $('record').classList.remove('recording');
     $('record').setAttribute('aria-label', 'Grabar audio');
     $('record').setAttribute('title', 'Grabar audio');
+  };
+  const stopRecording = (discard = false) => {
+    const attempt = recordingAttempt;
+    if (!attempt) return;
+    attempt.discard ||= discard;
+    attempt.stopping = true;
+    if (attempt.starting) { recordingAttempt = null; }
+    else {
+      setBusy(true);
+      // A few browser/device failures omit the final stop event. Release the
+      // interface and send any already-delivered chunks exactly once anyway.
+      attempt.stopTimer ??= setTimeout(() => { void attempt.finish(); }, 2000);
+      try { if (attempt.recorder?.state === 'recording') attempt.recorder.stop(); }
+      catch { attempt.stopFailed = true; }
+    }
+    releaseRecordingResources(attempt);
+    resetRecordingControls();
     updateControls();
   };
   $('record').addEventListener('click', async () => {
-    if (recorder?.state === 'recording') { stopRecording(); return; }
-    if (busy || welcoming || !session) return;
+    if (recordingAttempt?.recorder?.state === 'recording') { stopRecording(); return; }
+    if (recordingAttempt || busy || welcoming || pendingMessage || pendingAudio || !session || visitEnded) return;
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { showError('Este navegador no permite grabar. Podés escribir tu mensaje.'); return; }
-    showError(); $('record').disabled = true;
+    const attempt = { starting: true, stopping: false, discard: false, audibleSamples: 0 };
+    recordingAttempt = attempt;
+    const isCurrent = () => recordingAttempt === attempt && !attempt.discard && !visitEnded;
+    showError(); updateControls();
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      attempt.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!isCurrent()) { releaseRecordingResources(attempt); return; }
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       if (!AudioContext) throw new Error('AUDIO_METER_UNAVAILABLE');
-      audioContext = new AudioContext();
-      await audioContext.resume();
-      const analyser = audioContext.createAnalyser(); analyser.fftSize = 2048;
-      audioContext.createMediaStreamSource(stream).connect(analyser);
-      const samples = new Float32Array(analyser.fftSize); audibleSamples = 0;
-      voiceTimer = setInterval(() => {
+      attempt.context = new AudioContext();
+      await attempt.context.resume();
+      if (!isCurrent()) { releaseRecordingResources(attempt); return; }
+      const analyser = attempt.context.createAnalyser(); analyser.fftSize = 2048;
+      attempt.context.createMediaStreamSource(attempt.stream).connect(analyser);
+      const samples = new Float32Array(analyser.fftSize);
+      attempt.voiceTimer = setInterval(() => {
         analyser.getFloatTimeDomainData(samples);
         const rms = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
-        if (rms > 0.008) audibleSamples++;
+        if (rms > 0.008) attempt.audibleSamples++;
       }, 50);
       const type = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find(t => MediaRecorder.isTypeSupported(t));
-      recorder = new MediaRecorder(stream, { audioBitsPerSecond: 64000, ...(type ? { mimeType: type } : {}) });
-      const chunks = []; discardRecording = false;
+      const recorder = new MediaRecorder(attempt.stream, { audioBitsPerSecond: 64000, ...(type ? { mimeType: type } : {}) });
+      attempt.recorder = recorder;
+      const chunks = [];
       recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
-      recorder.onstop = async () => {
+      attempt.finish = async () => {
+        if (attempt.finished) return;
+        attempt.finished = true;
+        clearTimeout(attempt.stopTimer);
+        releaseRecordingResources(attempt);
+        if (recordingAttempt !== attempt) return;
+        recordingAttempt = null; resetRecordingControls();
         setBusy(false);
-        if (!discardRecording && audibleSamples < 5) {
+        if (attempt.discard || visitEnded) return;
+        if (attempt.audibleSamples < 5) {
           showError('No detectamos voz. Tocá Grabar audio y probá nuevamente.');
-        } else if (!discardRecording && chunks.length) {
+        } else if (chunks.length) {
           const mime = recorder.mimeType.split(';')[0];
           pendingAudio = { file: new File(chunks, `consulta.${mime.includes('mp4') ? 'm4a' : 'webm'}`, { type: mime }), text: '' };
           await sendAudio();
+        } else {
+          showError('No pudimos recuperar el audio de este navegador. Podés grabarlo de nuevo o escribir tu mensaje.');
         }
       };
-      recorder.onerror = () => { stopRecording(true); showError('No pudimos grabar. Podés intentar de nuevo o escribir tu mensaje.'); };
+      recorder.onstop = attempt.finish;
+      recorder.onerror = () => { if (!isCurrent()) return; attempt.stopFailed = true; stopRecording(); };
       recorder.start();
+      attempt.starting = false;
       const startedAt = Date.now(); $('timer').textContent = '0:00';
-      recordTimer = setInterval(() => {
+      attempt.recordTimer = setInterval(() => {
         const seconds = Math.floor((Date.now() - startedAt) / 1000);
         $('timer').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
         if (seconds >= 240) stopRecording();
@@ -220,23 +277,31 @@
       $('recording-note').hidden = false; $('record-label').textContent = 'Enviar'; $('record').classList.add('recording');
       $('record').setAttribute('aria-label', 'Enviar audio');
       $('record').setAttribute('title', 'Enviar audio');
-    } catch { closeAudioMeter(); stream?.getTracks().forEach(track => track.stop()); showError('No pudimos iniciar la grabación. Revisá el permiso del micrófono o escribí tu mensaje.'); }
+    } catch {
+      releaseRecordingResources(attempt);
+      if (recordingAttempt === attempt) {
+        recordingAttempt = null; resetRecordingControls();
+        if (!visitEnded) showError('No pudimos iniciar la grabación. Revisá el permiso del micrófono o escribí tu mensaje.');
+      }
+    }
     finally { updateControls(); }
   });
   $('cancel-recording').addEventListener('click', () => stopRecording(true));
   $('retry-audio').addEventListener('click', sendAudio);
-  $('discard-audio').addEventListener('click', () => { if (busy) return; clearAudio(); showError(); updateControls(); });
-  $('download').addEventListener('click', async () => {
-    $('download').disabled = true; showError();
+  $('discard-audio').addEventListener('click', () => { if (busy || (pendingMessage && pendingMessageIsAudio)) return; clearAudio(); showError(); updateControls(); });
+  const downloadReport = async (button) => {
+    button.disabled = true; showError();
     try {
-      const response = await fetch('/api/bot/report', { credentials: 'same-origin', cache: 'no-store' });
+      const response = await fetch('/api/bot/report', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(60_000) });
       if (!response.ok) throw new Error((await response.json()).error);
       const url = URL.createObjectURL(await response.blob());
       const link = document.createElement('a'); link.href = url; link.download = 'reku-motivo-de-consulta.pdf'; link.click();
       setTimeout(() => URL.revokeObjectURL(url), 30_000);
     } catch (error) { showError(error.message || 'No pudimos descargar el informe.'); }
-    finally { $('download').disabled = false; }
-  });
+    finally { button.disabled = false; }
+  };
+  $('download').addEventListener('click', () => downloadReport($('download')));
+  $('download-completed').addEventListener('click', () => downloadReport($('download-completed')));
   const closeSession = (current) => {
     if (!current?.instanceId) return;
     const body = JSON.stringify({ instanceId: current.instanceId });
@@ -249,8 +314,9 @@
     visitEnded = true;
     clearTimeout(welcomeTimer); welcomeTimer = null; welcoming = false;
     available = false;
+    completedReportAvailable = false;
     closeSession(session);
-    stopRecording(true); clearAudio(); pendingMessage = null; session = null;
+    stopRecording(true); clearAudio(); pendingMessage = null; pendingMessageIsAudio = false; messageNeedsRetry = false; session = null;
     $('message').value = ''; $('consent').checked = false;
     render();
   });
@@ -270,6 +336,7 @@
       const context = await api('context');
       if (visitEnded) return;
       accessMessage = context.access?.allowed === false ? context.access.message : '';
+      completedReportAvailable = context.access?.completed === true && context.access?.reportAvailable === true;
       available = context.available && !accessMessage; brandPage(context.brand);
       session = null; $('message').value = ''; $('consent').checked = false; render();
       if (!available && !accessMessage) showError('El asistente todavía no está disponible.');

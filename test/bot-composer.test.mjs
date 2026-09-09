@@ -33,7 +33,7 @@ test('recording cancellation sits beside audio send and the textbox cannot be re
   assert.match(html, /class="recording-timer">Grabando <strong id="timer">0:00<\/strong><\/div>\s*<div class="recording-help">Tocá Enviar/);
 });
 
-const setup = async ({ audioLevel = 0.02, search = '', hash = '', sessionOverrides = {}, autoStart = true, resetFails = false, sessionFails = false, transcription = 'Me duele la rodilla derecha', transcriptionFailures = 0, access = { allowed: true } } = {}) => {
+const setup = async ({ audioLevel = 0.02, search = '', hash = '', sessionOverrides = {}, autoStart = true, resetFails = false, sessionFails = false, transcription = 'Me duele la rodilla derecha', transcriptionFailures = 0, access = { allowed: true }, deferMicrophone = false, deferAudioResume = false, recorderStop = 'normal' } = {}) => {
   let focused;
   const element = tagName => ({
     tagName, children: [],
@@ -41,7 +41,7 @@ const setup = async ({ audioLevel = 0.02, search = '', hash = '', sessionOverrid
     classList: { toggle() {}, add() {}, remove() {} },
     addEventListener(type, handler) { this.handlers[type] = handler; },
     replaceChildren(...children) { this.children = children; }, append(...children) { this.children.push(...children); }, removeAttribute() {}, setAttribute() {},
-    focus() { focused = this; }, scrollIntoView() {},
+    focus() { focused = this; }, scrollIntoView() {}, click() { this.clicked = true; },
   });
   const elements = new Map();
   const get = id => {
@@ -49,11 +49,16 @@ const setup = async ({ audioLevel = 0.02, search = '', hash = '', sessionOverrid
     return elements.get(id);
   };
   let resolveRequest;
+  let rejectRequest;
   const requests = [];
   const urls = [];
   const replacedHistory = [];
   const audioRequests = [];
   const diagnostics = [];
+  const microphoneRequests = [];
+  const recorders = [];
+  const audioContexts = [];
+  const apiTimeouts = [];
   const windowHandlers = {};
   const beacons = [];
   let reloads = 0;
@@ -62,18 +67,21 @@ const setup = async ({ audioLevel = 0.02, search = '', hash = '', sessionOverrid
   let timerId = 0;
   let now = 0;
   class AudioContext {
-    async resume() {}
-    async close() {}
+    constructor() { this.closed = false; audioContexts.push(this); }
+    async resume() { if (deferAudioResume) await new Promise(resolve => { this.finishResume = resolve; }); }
+    async close() { this.closed = true; }
     createAnalyser() { return { fftSize: 2048, getFloatTimeDomainData: samples => samples.fill(audioLevel) }; }
     createMediaStreamSource() { return { connect() {} }; }
   }
   class MediaRecorder {
     static isTypeSupported() { return true; }
-    constructor() { this.state = 'inactive'; this.mimeType = 'audio/webm'; }
+    constructor(stream) { this.state = 'inactive'; this.mimeType = 'audio/webm'; this.stream = stream; recorders.push(this); }
     start() { this.state = 'recording'; }
     stop() {
       this.state = 'inactive';
       this.ondataavailable({ data: new Blob(['fake-audio']) });
+      if (recorderStop === 'throws') throw new Error('Recorder stop failed');
+      if (recorderStop === 'missing-event') return;
       queueMicrotask(() => this.onstop());
     }
   }
@@ -82,14 +90,21 @@ const setup = async ({ audioLevel = 0.02, search = '', hash = '', sessionOverrid
   vm.runInNewContext(await readFile(new URL('../bot/app.js', import.meta.url), 'utf8'), {
     document: { getElementById: get, createElement: element, createTextNode: text => text, body: element() },
     location: { search, hash, pathname: '/bot', reload: () => reloads++ }, history: { replaceState: (_state, _title, url) => replacedHistory.push(url) }, window: { addEventListener: (event, fn) => { windowHandlers[event] = fn; }, AudioContext, MediaRecorder },
-    navigator: { sendBeacon: (url, body) => { beacons.push({ url, body }); return true; }, mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } },
+    navigator: { sendBeacon: (url, body) => { beacons.push({ url, body }); return true; }, mediaDevices: { getUserMedia: () => {
+      const tracks = [{ stopped: false, stop() { this.stopped = true; } }];
+      const stream = { getTracks: () => tracks };
+      return new Promise((resolve, reject) => {
+        microphoneRequests.push({ tracks, stream, resolve: () => resolve(stream), reject });
+        if (!deferMicrophone) resolve(stream);
+      });
+    } } },
     MediaRecorder, File, Blob, Date: { now: () => now },
     console: { info: (...args) => diagnostics.push(args) },
     setInterval: (callback, ms) => { timers.set(++timerId, { callback, ms }); return timerId; },
     clearInterval: id => timers.delete(id),
     setTimeout: (callback, ms) => { timeouts.set(++timerId, { callback, at: now + ms }); return timerId; },
     clearTimeout: id => timeouts.delete(id),
-    URLSearchParams, URL, FormData, AbortSignal, crypto: { randomUUID },
+    URLSearchParams, URL, FormData, AbortSignal: { timeout: ms => { apiTimeouts.push(ms); return AbortSignal.timeout(ms); } }, crypto: { randomUUID },
     fetch: async (url, options) => {
       urls.push(url);
       if (url.endsWith('/access')) { assert.equal(replacedHistory.length, 1); assert.equal(JSON.parse(options.body).token, 'private-test-token'); return response({ ok: true }); }
@@ -101,8 +116,9 @@ const setup = async ({ audioLevel = 0.02, search = '', hash = '', sessionOverrid
         if (transcriptionFailures-- > 0) return response({ error: 'Error temporal' }, false);
         return response({ text: transcription });
       }
+      if (url.endsWith('/report')) return { ok: true, blob: async () => new Blob(['test-report']) };
       requests.push(JSON.parse(options.body));
-      return new Promise(resolve => { resolveRequest = resolve; });
+      return new Promise((resolve, reject) => { resolveRequest = resolve; rejectRequest = reject; });
     },
   });
   await new Promise(resolve => setImmediate(resolve));
@@ -110,11 +126,12 @@ const setup = async ({ audioLevel = 0.02, search = '', hash = '', sessionOverrid
   const submit = () => get('composer').handlers.submit({ preventDefault() {} });
   get('composer').requestSubmit = submit;
   return {
-    get, submit, requests, urls, replacedHistory, audioRequests, diagnostics, windowHandlers, beacons, reloads: () => reloads, focused: () => focused,
+    get, submit, requests, urls, replacedHistory, audioRequests, diagnostics, windowHandlers, beacons, microphoneRequests, recorders, audioContexts, apiTimeouts, reloads: () => reloads, focused: () => focused,
     sampleAudio: () => { for (const timer of timers.values()) if (timer.ms === 50) for (let i = 0; i < 6; i++) timer.callback(); },
     tickRecording: ms => { now += ms; for (const timer of timers.values()) if (timer.ms === 500) timer.callback(); },
     tickWelcome: ms => { now += ms; for (const [id, timer] of timeouts) if (timer.at <= now) { timeouts.delete(id); timer.callback(); } },
     finish: (ok = true, overrides = {}) => resolveRequest(response(ok ? { session: { ...session, version: 1, ...overrides } } : { error: 'Error de prueba' }, ok)),
+    loseResponse: () => rejectRequest(new TypeError('Network connection interrupted')),
   };
 };
 
@@ -203,6 +220,27 @@ test('access denial hides the interview and consent and displays the friendly me
     assert.equal(app.get('start').disabled, true);
     assert.equal(app.urls.includes('/api/bot/session'), false);
   }
+});
+test('completed appointment can download its saved report without opening a new conversation', async () => {
+  const message = 'Ya completaste la entrevista para este turno.';
+  const app = await setup({ access: { allowed: false, completed: true, reportAvailable: true, message } });
+  assert.equal(app.get('completed-report').hidden, false);
+  assert.equal(app.get('completed-report-message').textContent, message);
+  assert.equal(app.get('intro').hidden, true);
+  assert.equal(app.get('chat-card').hidden, true);
+  assert.equal(app.get('start-panel').hidden, true);
+  assert.equal(app.urls.includes('/api/bot/session'), false);
+  await app.get('download-completed').handlers.click();
+  assert.ok(app.urls.includes('/api/bot/report'));
+  assert.equal(app.get('download-completed').disabled, false);
+  app.windowHandlers.pagehide();
+  assert.equal(app.get('completed-report').hidden, true);
+});
+test('completed appointment without a persisted report does not show a broken download', async () => {
+  const app = await setup({ access: { allowed: false, completed: true, reportAvailable: false, message: 'Ya completaste la entrevista.' } });
+  assert.equal(app.get('completed-report').hidden, true);
+  assert.equal(app.get('access-notice').hidden, false);
+  assert.equal(app.get('chat-card').hidden, true);
 });
 test('each visit resets before starting and never restores a finished conversation', async () => {
   const app = await setup({ autoStart: false, sessionOverrides: { status: 'complete', messages: [{ role: 'user', text: 'Conversación anterior' }] } });
@@ -412,14 +450,213 @@ test('failed audio sends retry with the same request id without entering the inp
   assert.equal(app.get('audio-retry').hidden, true);
 });
 
-test('a failed send restores the original message without losing the next draft', async () => {
+test('a failed send preserves its immutable request separately from the next draft', async () => {
   const app = await setup();
   app.get('message').value = 'Primer mensaje';
   const pending = app.submit();
   app.get('message').value = 'Borrador siguiente';
   app.finish(false);
   await pending;
-  assert.equal(app.get('message').value, 'Primer mensaje\n\nBorrador siguiente');
+  assert.equal(app.get('message').value, 'Borrador siguiente');
   assert.equal(app.get('message').disabled, false);
   assert.equal(app.get('error').textContent, 'Error de prueba');
+  assert.equal(app.get('send').disabled, true);
+  assert.equal(app.get('record').disabled, true);
+  assert.equal(app.get('message-retry').hidden, false);
+  assert.equal(app.focused(), app.get('message'));
+  await app.submit();
+  assert.equal(app.requests.length, 1, 'A new draft cannot replace the uncertain request');
+  const retry = app.get('retry-message').handlers.click();
+  assert.deepEqual(app.requests[1], app.requests[0]);
+  assert.equal(app.get('message').value, 'Borrador siguiente');
+  app.finish(true, { messages: [{ role: 'user', text: 'Primer mensaje' }, { role: 'assistant', text: 'Respuesta' }] });
+  await retry;
+  assert.equal(app.get('message-retry').hidden, true);
+  assert.equal(app.get('send').disabled, false);
+  assert.equal(app.get('message').value, 'Borrador siguiente');
+  const next = app.submit();
+  assert.equal(app.requests[2].text, 'Borrador siguiente');
+  assert.equal(app.requests[2].version, 1);
+  assert.notEqual(app.requests[2].requestId, app.requests[0].requestId);
+  app.finish(true, { version: 2 });
+  await next;
+});
+
+test('lost HTTP response retries exactly the same message and version before sending the next draft', async () => {
+  const app = await setup();
+  app.get('message').value = 'Mensaje recibido por el servidor';
+  const first = app.submit();
+  app.get('message').value = 'Otro detalle';
+  app.loseResponse();
+  await first;
+  const retry = app.get('retry-message').handlers.click();
+  assert.deepEqual(app.requests[1], app.requests[0]);
+  assert.equal(app.requests[1].version, 0);
+  app.finish(true, { version: 1, messages: [{ role: 'user', text: 'Mensaje recibido por el servidor' }, { role: 'assistant', text: 'Respuesta recuperada' }] });
+  await retry;
+  assert.equal(app.get('message').value, 'Otro detalle');
+  assert.equal(app.get('messages').children.length, 2);
+});
+
+test('uncertain audio delivery cannot be discarded or replaced and retries without retranscription', async () => {
+  const app = await setup();
+  await app.get('record').handlers.click();
+  app.sampleAudio();
+  await app.get('record').handlers.click();
+  await new Promise(resolve => setImmediate(resolve));
+  app.get('message').value = 'Siguiente borrador';
+  app.loseResponse();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(app.get('discard-audio').disabled, true);
+  app.get('discard-audio').handlers.click();
+  await app.get('record').handlers.click();
+  await app.submit();
+  assert.equal(app.recorders.length, 1);
+  assert.equal(app.requests.length, 1);
+  const retry = app.get('retry-audio').handlers.click();
+  assert.deepEqual(app.requests[1], app.requests[0]);
+  assert.equal(app.audioRequests.length, 1);
+  app.finish();
+  await retry;
+  assert.equal(app.get('message').value, 'Siguiente borrador');
+  assert.equal(app.get('audio-retry').hidden, true);
+});
+
+test('pending microphone permission cannot be reenabled by typing or start a second capture', async () => {
+  const app = await setup({ deferMicrophone: true });
+  const first = app.get('record').handlers.click();
+  assert.equal(app.get('record').disabled, true);
+  assert.equal(app.get('cancel-recording').hidden, false);
+  app.get('message').value = 'Un detalle';
+  app.get('message').handlers.input();
+  assert.equal(app.get('record').disabled, true);
+  assert.equal(app.get('message').disabled, true);
+  await app.get('record').handlers.click();
+  assert.equal(app.microphoneRequests.length, 1);
+  app.microphoneRequests[0].resolve();
+  await first;
+  assert.equal(app.recorders.length, 1);
+  assert.equal(app.recorders[0].state, 'recording');
+  app.get('cancel-recording').handlers.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(app.recorders[0].state, 'inactive');
+  assert.equal(app.microphoneRequests[0].tracks[0].stopped, true);
+  assert.equal(app.audioRequests.length, 0);
+});
+
+test('leaving while microphone permission is pending stops late tracks without creating a recorder', async () => {
+  const app = await setup({ deferMicrophone: true });
+  const pending = app.get('record').handlers.click();
+  app.windowHandlers.pagehide();
+  app.microphoneRequests[0].resolve();
+  await pending;
+  assert.equal(app.microphoneRequests[0].tracks[0].stopped, true);
+  assert.equal(app.recorders.length, 0);
+  assert.equal(app.audioRequests.length, 0);
+  assert.equal(app.get('chat-card').hidden, true);
+});
+
+test('cancelling pending permission cannot let stale tracks affect a newer recording', async () => {
+  const app = await setup({ deferMicrophone: true });
+  const stale = app.get('record').handlers.click();
+  app.get('cancel-recording').handlers.click();
+  assert.equal(app.get('record').disabled, false);
+  const current = app.get('record').handlers.click();
+  app.microphoneRequests[1].resolve();
+  await current;
+  app.microphoneRequests[0].resolve();
+  await stale;
+  assert.equal(app.recorders.length, 1);
+  assert.equal(app.microphoneRequests[0].tracks[0].stopped, true);
+  assert.equal(app.microphoneRequests[1].tracks[0].stopped, false);
+  assert.equal(app.recorders[0].state, 'recording');
+  app.get('cancel-recording').handlers.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(app.microphoneRequests[1].tracks[0].stopped, true);
+});
+
+test('leaving while the audio context resumes closes it and never starts recording', async () => {
+  const app = await setup({ deferAudioResume: true });
+  const pending = app.get('record').handlers.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(app.audioContexts.length, 1);
+  app.windowHandlers.pagehide();
+  assert.equal(app.audioContexts[0].closed, true);
+  app.audioContexts[0].finishResume();
+  await pending;
+  assert.equal(app.recorders.length, 0);
+  assert.equal(app.microphoneRequests[0].tracks[0].stopped, true);
+});
+
+for (const recorderStop of ['missing-event', 'throws']) test(`recorder ${recorderStop} recovers captured voice and a late stop cannot send it twice`, async () => {
+  const app = await setup({ recorderStop });
+  await app.get('record').handlers.click();
+  app.sampleAudio();
+  const recorder = app.recorders[0];
+  await app.get('record').handlers.click();
+  assert.equal(app.get('record').disabled, true);
+  assert.equal(app.microphoneRequests[0].tracks[0].stopped, true);
+  app.tickWelcome(1999);
+  assert.equal(app.audioRequests.length, 0);
+  app.tickWelcome(1);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(app.audioRequests.length, 1);
+  assert.equal(await app.audioRequests[0].get('audio').text(), 'fake-audio');
+  assert.equal(app.get('cancel-recording').hidden, true);
+  app.finish();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(app.get('record').disabled, false);
+  await recorder.onstop();
+  app.tickWelcome(10000);
+  assert.equal(app.audioRequests.length, 1);
+  assert.equal(app.requests.length, 1);
+});
+
+test('cancel still frees the recorder when the browser omits its stop event without sending audio', async () => {
+  const app = await setup({ recorderStop: 'missing-event' });
+  await app.get('record').handlers.click();
+  app.sampleAudio();
+  app.get('cancel-recording').handlers.click();
+  app.tickWelcome(2000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(app.get('record').disabled, false);
+  assert.equal(app.get('cancel-recording').hidden, true);
+  assert.equal(app.microphoneRequests[0].tracks[0].stopped, true);
+  assert.equal(app.audioRequests.length, 0);
+  await app.recorders[0].onstop();
+  assert.equal(app.audioRequests.length, 0);
+});
+
+test('inactive recorder error without a stop event recovers buffered audio and never stays busy', async () => {
+  const app = await setup();
+  await app.get('record').handlers.click();
+  app.sampleAudio();
+  const recorder = app.recorders[0];
+  recorder.ondataavailable({ data: new Blob(['already-buffered-voice']) });
+  recorder.state = 'inactive';
+  recorder.onerror();
+  app.tickWelcome(2000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(await app.audioRequests[0].get('audio').text(), 'already-buffered-voice');
+  app.finish();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(app.get('record').disabled, false);
+  assert.equal(app.microphoneRequests[0].tracks[0].stopped, true);
+});
+
+test('message timeout has overhead beyond the shared AI deadline while audio allows upload time', async () => {
+  const app = await setup();
+  app.get('message').value = 'Relato';
+  const pending = app.submit();
+  assert.equal(app.apiTimeouts.at(-1), 30_000);
+  app.finish();
+  await pending;
+  await app.get('record').handlers.click();
+  app.sampleAudio();
+  await app.get('record').handlers.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(app.apiTimeouts.includes(100_000));
+  assert.equal(app.apiTimeouts.at(-1), 30_000);
+  app.finish();
+  await new Promise(resolve => setImmediate(resolve));
 });

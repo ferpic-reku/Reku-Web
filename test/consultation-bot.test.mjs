@@ -103,6 +103,7 @@ test("audio rejects unsupported types before contacting the provider", async () 
 test("long audio transcripts are preserved up to 12000 characters and message transport accepts them", async () => {
   const text = 'Relato de prueba. '.repeat(300).trim();
   const result = await transcribeConsultation({ mimeType: 'audio/webm', buffer: Buffer.from('fake-audio') }, {
+    validateAudioImpl: async file => file,
     settings: { apiKey: 'test', transcriptionModel: 'test' }, fetchImpl: async () => ({ ok: true, json: async () => ({ text }) }),
   });
   assert.equal(result, text);

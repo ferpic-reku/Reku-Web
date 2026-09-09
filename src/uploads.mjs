@@ -29,6 +29,8 @@ export const parseMultipartForm = (
     maxBytes = config.uploadMaxBytes,
     maxFiles = 4,
     collectFiles = false,
+    signal,
+    timeoutMs = 30_000,
   } = {},
 ) =>
   new Promise((resolve, reject) => {
@@ -38,20 +40,64 @@ export const parseMultipartForm = (
         fileSize: maxBytes,
         files: maxFiles,
         fields: 80,
+        fieldSize: Math.min(maxBytes, 1024 * 1024),
+        parts: maxFiles + 80,
       },
     });
-    const fields = {};
-    const files = {};
+    const fields = Object.create(null);
+    const files = Object.create(null);
     let totalBytes = 0;
-    let failed = false;
-
-    const fail = (error) => {
-      if (failed) return;
-      failed = true;
-      reject(error);
+    let requestBytes = 0;
+    let settled = false;
+    const streams = new Set();
+    const errorFor = (message, statusCode) => Object.assign(new Error(message), { statusCode });
+    const onRequestError = error => fail(error);
+    const onAborted = () => fail(errorFor("UPLOAD_ABORTED", 400));
+    const onClose = () => { if (!request.complete && !request.readableEnded) onAborted(); };
+    const onSignal = () => fail(errorFor("UPLOAD_ABORTED", 408));
+    const onData = chunk => {
+      requestBytes += chunk.length;
+      // Include fields and multipart overhead, not only file streams.
+      if (requestBytes > maxBytes + 64 * 1024) fail(errorFor("PAYLOAD_TOO_LARGE", 413));
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onSignal);
+      request.removeListener("data", onData);
+      request.removeListener("aborted", onAborted);
+      request.removeListener("close", onClose);
+      request.removeListener("error", onRequestError);
     };
 
-    busboy.on("field", (name, value) => {
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      request.unpipe(busboy);
+      // Every file stream needs its own error handler: a Busboy handler alone
+      // cannot catch "Unexpected end of form" emitted by FileStream.
+      // Defer destruction until Busboy's current callback has returned. A
+      // synchronous destroy from its "limit" callback mutates internal state
+      // while Busboy is still updating that same file stream.
+      queueMicrotask(() => {
+        for (const file of streams) file.destroy();
+        streams.clear();
+        busboy.destroy();
+      });
+      for (const key of Object.keys(files)) delete files[key];
+      // A late socket error must not become an uncaught EventEmitter error.
+      request.once("error", () => {});
+      if (!request.destroyed) request.resume();
+      reject(error);
+    };
+    const timer = setTimeout(() => {
+      fail(errorFor("UPLOAD_TIMEOUT", 408));
+      request.destroy();
+    }, timeoutMs);
+
+    busboy.on("field", (name, value, info) => {
+      if (settled) return;
+      if (info.valueTruncated || info.nameTruncated) { fail(errorFor("PAYLOAD_TOO_LARGE", 413)); return; }
       fields[name] = value;
     });
 
@@ -59,6 +105,11 @@ export const parseMultipartForm = (
       const chunks = [];
       const filename = info.filename || "";
       const mimeType = normalizeMimeType(info.mimeType);
+      streams.add(file);
+      file.on("error", error => fail(Object.assign(error, { statusCode: error.statusCode || 422 })));
+      file.on("close", () => streams.delete(file));
+
+      if (settled) { file.resume(); return; }
 
       if (!filename) {
         file.resume();
@@ -66,7 +117,7 @@ export const parseMultipartForm = (
       }
 
       file.on("data", (chunk) => {
-        if (failed) return;
+        if (settled) return;
         totalBytes += chunk.length;
         if (totalBytes > maxBytes) {
           const error = new Error("PAYLOAD_TOO_LARGE");
@@ -84,7 +135,7 @@ export const parseMultipartForm = (
       });
 
       file.on("end", () => {
-        if (!failed && chunks.length > 0) {
+        if (!settled && chunks.length > 0) {
           const upload = {
             filename,
             mimeType,
@@ -101,15 +152,23 @@ export const parseMultipartForm = (
     });
 
     busboy.on("filesLimit", () => {
-      if (failed) return;
+      if (settled) return;
       const error = new Error("TOO_MANY_FILES");
       error.statusCode = 422;
       fail(error);
     });
-    busboy.on("error", reject);
+    busboy.on("fieldsLimit", () => fail(errorFor("TOO_MANY_FIELDS", 422)));
+    busboy.on("partsLimit", () => fail(errorFor("TOO_MANY_PARTS", 422)));
+    busboy.on("error", error => fail(Object.assign(error, { statusCode: error.statusCode || 422 })));
     busboy.on("finish", () => {
-      if (!failed) resolve({ fields, files });
+      if (!settled) { settled = true; cleanup(); resolve({ fields, files }); }
     });
+    request.on("error", onRequestError);
+    request.on("aborted", onAborted);
+    request.on("close", onClose);
+    request.on("data", onData);
+    signal?.addEventListener("abort", onSignal, { once: true });
+    if (signal?.aborted || request.aborted || request.destroyed) { onAborted(); return; }
     request.pipe(busboy);
   });
 

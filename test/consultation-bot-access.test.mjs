@@ -6,6 +6,8 @@ import { handleConsultationBot } from '../src/consultation-bot.mjs';
 
 test('access mode is server-only and invalid values fail closed', () => {
   assert.equal(consultationBotMode({}), 'test');
+  assert.equal(consultationBotMode({ APP_ENV: 'production' }), 'production');
+  assert.equal(consultationBotMode({ APP_ENV: 'production', CONSULTATION_BOT_MODE: 'test' }), 'test');
   assert.equal(consultationBotMode({ CONSULTATION_BOT_MODE: 'production' }), 'production');
   assert.throws(() => consultationBotMode({ CONSULTATION_BOT_MODE: 'prod' }), /MODE_INVALID/);
 });

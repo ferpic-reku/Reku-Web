@@ -1,3 +1,5 @@
+import { validateConsultationAudio } from "./consultation-bot-audio.mjs";
+
 export const botSettings = {
   apiKey: process.env.OPENAI_API_KEY || "",
   model: process.env.OPENAI_BOT_MODEL || "gpt-4.1-mini",
@@ -6,11 +8,12 @@ export const botSettings = {
 
 const string = { type: ["string", "null"] };
 const evidenceKeys = ["reason", "location", "side", "onset", "mechanism", "pain", "limitations"];
+const globalEvidenceKeys = ["priorCare", "goal"];
 const complaintProperties = {
   id: { ...string, description: "Conservá el id de la molestia del estado previo. Para una molestia nueva usá null." },
   reason: { ...string, description: "Motivo descriptivo breve con zona anatómica, sin diagnóstico añadido. 'Me torcí' + tobillo -> 'Torcedura de tobillo', NO 'Me torcí' ni 'Esguince'." },
   location: string,
-  locationClear: { type: "boolean" },
+  locationClear: { type: "boolean", description: "True si permite ubicar la molestia con utilidad para admisión, aunque sea un músculo, grupo muscular, articulación o región y no una precisión de diagnóstico. False sólo si distintas zonas materialmente diferentes siguen siendo posibles; lateralidad se evalúa aparte." },
   sideRequired: { type: "boolean" },
   side: string,
   onset: string,
@@ -38,6 +41,10 @@ export const intakeSchema = {
     },
     priorCare: string,
     goal: string,
+    globalEvidence: { type: "object", additionalProperties: false,
+      properties: Object.fromEntries(globalEvidenceKeys.map(key => [key, { ...string, description: "Cita literal de un mensaje del paciente que respalda este dato; null si el dato no está informado." }])),
+      required: globalEvidenceKeys,
+    },
     contextAnswered: { type: "boolean" },
     urgent: { type: "boolean" },
     urgentReason: string,
@@ -45,8 +52,8 @@ export const intakeSchema = {
       type: "array", maxItems: 20, items: {
         type: "object", additionalProperties: false,
         properties: {
-          complaintId: { type: "string" },
-          field: { type: "string", enum: ["complaint", ...evidenceKeys] },
+          complaintId: { ...string, description: "Id existente para campos de una molestia; null para priorCare o goal, que son datos globales." },
+          field: { type: "string", enum: ["complaint", ...evidenceKeys, ...globalEvidenceKeys] },
           evidence: { type: "string", description: "Cita literal del ÚLTIMO mensaje que niega o corrige ese dato previo." },
         }, required: ["complaintId", "field", "evidence"],
       },
@@ -59,7 +66,7 @@ export const intakeSchema = {
       }, required: ["status", "value", "evidence"],
     },
   },
-  required: ["complaints", "priorCare", "goal", "contextAnswered", "urgent", "urgentReason", "corrections", "lastAnswer"],
+  required: ["complaints", "priorCare", "goal", "globalEvidence", "contextAnswered", "urgent", "urgentReason", "corrections", "lastAnswer"],
 };
 
 const instructions = `Sos el extractor de una entrevista de admisión para telerehabilitación kinésica de Reku.
@@ -71,12 +78,14 @@ Recibís estado previo validado y la última pregunta con campo e id de molestia
 ANTES de responder la última pregunta, interpretá si el paciente está corrigiendo lo entendido. Una corrección NO es una respuesta a la pregunta pendiente ni un mensaje fuera de tema. lastAnswer.status=correction si es clara; correction_unclear si dice que entendiste mal pero no se sabe qué dato cambiar. En esos estados value=null y evidence cita el último mensaje. Si realmente intenta responder y no se entiende, usá unclear; nunca adivines ni avances por completar casilleros.
 corrections enumera sólo datos previos explícitamente negados/corregidos en el ÚLTIMO mensaje, con complaintId existente, field y evidencia literal actual; [] si no hay corrección. field=complaint si niega que tenga esa molestia (ej.: 'no me duele la cabeza', 'no era la cabeza'); quitá esa molestia de complaints y no heredes sus datos en otra. Si además dice 'es la rodilla', creá la molestia real con id=null y sólo datos que efectivamente le correspondan. Para corregir un campo de la misma molestia (lado, fecha, intensidad, causa), usá ese field, conservá el id, y devolvé en complaints el valor corregido o null si aún no lo aclara. No basta omitir un dato para retirarlo: declaralo en corrections. Una precisión de zona no niega la molestia completa.
 Ejemplos: pregunta por dolor de cabeza + 'no es la cabeza' -> corrections=[{complaintId: id previo, field:'complaint', evidence:'no es la cabeza'}], complaints sin cabeza, lastAnswer.status=correction. 'No, me entendiste mal' sin detalle -> correction_unclear, no inventes reemplazo. 'No es derecha, es izquierda' -> correction de side y side='izquierda', no lo interpretes como respuesta a cuándo empezó. 'No sé cuándo empezó' NO retira la molestia. 'No tengo moretón' en una pregunta adicional NO retira la lesión. 'No me duele ahora' significa dolor actual 0, no que nunca haya tenido esa lesión. Texto incoherente o sin síntomas claros NO permite inventar una zona como cabeza.
-El estado puede incluir retiredComplaintIds y invalidatedFields: son datos descartados por correcciones; no los recuperes de mensajes viejos. Si vuelve a afirmar una molestia retirada, es una nueva con id=null y evidencia del mensaje actual.
+El estado puede incluir retiredComplaintIds, invalidatedFields e invalidatedGlobalFields: son datos descartados por correcciones; no los recuperes de mensajes viejos. Si vuelve a afirmar una molestia retirada, es una nueva con id=null y evidencia del mensaje actual.
+Las correcciones también abarcan antecedentes y objetivos: para priorCare o goal usá complaintId=null y evidencia literal del último mensaje. Si dice 'nunca me operaron' y antes figuraba cirugía, declaralo en corrections con field=priorCare; quitá el antecedente falso y devolvé null o la negación/corrección explícita respaldada en globalEvidence.priorCare. No conserves antecedentes u objetivos retirados sólo por haber aparecido antes. Omitir un campo sin una corrección explícita no lo borra.
 lastAnswer interpreta ÚNICAMENTE el último mensaje como respuesta a la última pregunta: answered si responde (incluso no sabe o prefiere no responder), unclear si intenta responder pero es ambiguo, unrelated si habla de otra cosa o no hay última pregunta. value es el dato normalizado (para dolor, número como texto o 'No informado: ...'); evidence es cita literal del último mensaje. Una respuesta corta se refiere a esa pregunta y esa molestia, nunca a otra. No atribuyas '3' a otra molestia.
 Un 'no' ante una pregunta compuesta como 'golpe, esfuerzo, gradual o no recordás' es ambiguo: lastAnswer.status=unclear, no inventes el mecanismo. Una negativa a una pregunta simple sí es una respuesta. Mantené los datos anteriores salvo corrección explícita apoyada por el mensaje actual.
 Cada campo no nulo de una molestia requiere en evidence una cita LITERAL de un mensaje del paciente que respalde ese dato. Para pain citá la frase con el número o su negativa. Para campos desconocidos evidence=null. No uses las preguntas del asistente como evidencia. No inventes ni parafrasees las citas.
 Separá molestias diferentes en complaints (hasta 5), manteniendo orden y detalles de cada una. Campos desconocidos: null, nunca los completes por deducción clínica.
-reason: frase nominal descriptiva breve, con la zona referida. Normalizá la redacción, no el diagnóstico: 'me torcí el tobillo' -> 'Torcedura de tobillo'; 'me duele la rodilla' -> 'Dolor de rodilla'. No dejes frases incompletas como 'me torcí'. No conviertas una torcedura en esguince ni un tirón en desgarro. evidence.reason sigue siendo literal, por ejemplo 'me torcí'; reason NO necesita ser una cita literal. location: zona anatómica y detalle mencionado. locationClear: rodilla, tobillo, hombro, cuello, espalda baja son suficientemente claros; pierna, brazo, espalda sin sector, costado no. Si el paciente dice que no puede precisar tras una pregunta, conservá esa incertidumbre y locationClear=true.
+reason: frase nominal descriptiva breve, con la zona referida. Normalizá la redacción, no el diagnóstico: 'me torcí el tobillo' -> 'Torcedura de tobillo'; 'me duele la rodilla' -> 'Dolor de rodilla'. No dejes frases incompletas como 'me torcí'. No conviertas una torcedura en esguince ni un tirón en desgarro. evidence.reason sigue siendo literal, por ejemplo 'me torcí'; reason NO necesita ser una cita literal. location: conservá la zona anatómica y todo detalle mencionado, integrando precisiones posteriores sin perder la región ya conocida.
+locationClear aplica un criterio GENERAL de utilidad para admisión, no una lista de zonas permitidas: true si nombró una estructura, grupo muscular, articulación o región anatómica reconocible que permita al profesional ubicar la molestia. Un músculo o grupo muscular es tan válido como una articulación; 'a la altura de' no lo vuelve impreciso por sí solo. No exijas identificar un músculo exacto dentro de un grupo ni precisión diagnóstica. False sólo si falta ubicación o quedan varias regiones materialmente distintas y una aclaración sencilla aportaría. No confundas falta de lado con falta de zona: sideRequired/side lo resuelven aparte. Si no puede o no quiere precisar tras una pregunta, preservá la ubicación anterior, lastAnswer.value='No informado: no puede precisar' y locationClear=true; NO reemplaces la zona conocida por esa frase. lastAnswer de detail debe integrar la región previa y la nueva precisión, no una palabra aislada como 'interna'.
 sideRequired: true para extremidades, articulaciones pares o molestias laterales. side: izquierda, derecha, ambas o lo que el paciente diga; nunca lo infieras. Para zonas centrales no exijas lateralidad.
 onset: desde cuándo empezó o fecha aproximada de lesión; no inventes fechas exactas.
 mechanism: describí CÓMO ocurrió y conservá el contexto o actividad referido, no lo reduzcas a una etiqueta. Si dice 'me torcí el tobillo jugando al fútbol', guardá 'Torcedura jugando al fútbol', no sólo 'torcedura'. Si dice 'levantando una caja en el trabajo', conservá la caja y el trabajo. La actividad que agrava el dolor hoy NO es el mecanismo inicial. 'Hace meses' tampoco describe un mecanismo. evidence.mechanism debe citar el fragmento que respalda también la actividad/contexto. Si amplía después, integrá lo ya conocido con el nuevo dato; no lo reemplaces por una versión más corta.
@@ -90,14 +99,15 @@ Ejemplos obligatorios de interpretación (no son hechos del paciente):
 Una respuesta breve se interpreta por la última pregunta, NO por palabras aisladas: si se preguntó qué estaba haciendo cuando ocurrió y contesta 'Caminando', mechanism='Caminando', mechanismClear=true y lastAnswer={status:'answered',value:'Caminando',evidence:'Caminando'}. No hace falta que describa cómo se dobló el pie. Si ya dijo que se torció el tobillo, reason='Torcedura de tobillo'. 'Caminando' NO significa 'no recuerda' ni 'no sabe'. En cambio, si se preguntó qué actividad le molesta hoy, 'caminando' corresponde a limitations, no cambia el mecanismo. 'No informado: no recuerda' requiere una manifestación explícita del paciente sobre ESE dato, no una interpretación por falta de detalles.
 pain: dolor ACTUAL de 0 a 10. Nunca conviertas leve/moderado/fuerte a un número. Aceptá 0 si dice sin dolor. Si da rango, no elijas un número: null y guardá el rango en painNote. Si dice 15, null. painNote: contexto como dolor al caminar/reposo o negativa explícita a cuantificar.
 limitations: actividad/movimiento que cuesta o agrava el dolor; también sirve 'no me limita'. No infieras limitaciones.
-priorCare: consultas, diagnóstico referido, cirugía reciente, estudios o tratamientos previos por esta molestia; sólo si lo dijo. goal: actividad que quiere recuperar.
+priorCare: consultas, diagnóstico referido, cirugía reciente, estudios o tratamientos previos por esta molestia; sólo si lo dijo. goal: actividad que quiere recuperar. Cada valor no nulo requiere globalEvidence con una cita literal del paciente; no deduzcas antecedentes de preguntas ni objetivos de una actividad que hoy duele. Las negaciones explícitas deben conservar su sentido y jamás convertirse en antecedentes positivos.
 contextAnswered=true sólo si contestó la pregunta opcional sobre atención previa y objetivos (también si prefiere omitirla), o si ya contó AMBAS cosas espontáneamente.
 Si ante una pregunta el paciente explícitamente no sabe o no desea responder, registrá 'No informado: no recuerda' o 'No informado: prefiere no responder' en el campo correspondiente y no lo inventes. Para dolor dejá pain=null y painNote='No informado: prefiere no responder' (o no sabe cuantificar). No trates mensajes fuera de tema como negativas.
 urgent=true sólo ante síntomas expresamente relatados de posible urgencia actual: dolor de pecho con falta de aire, lesión con deformidad o imposibilidad de apoyar tras trauma, fiebre con articulación caliente/hinchada, pérdida nueva de fuerza/sensibilidad, pérdida nueva de control de esfínteres o anestesia perineal, o dolor actual insoportable 10/10. No diagnostiques la causa. Diferenciá negaciones y hechos pasados/resueltos. urgentReason cita brevemente lo relatado. Si no hay relato de alarma, urgent=false y urgentReason=null; esto NO significa que se hayan descartado urgencias.
 Escribí en español rioplatense conciso. No incluyas nombres, emails ni otros identificadores aunque aparezcan; es una prueba sin ficha de paciente.`;
 
-export const analyzeConsultation = async (messages, { fetchImpl = fetch, settings = botSettings, repairEvidence = false, previousData = null, lastQuestion = null, invalidEvidence = [] } = {}) => {
+export const analyzeConsultation = async (messages, { fetchImpl = fetch, settings = botSettings, repairEvidence = false, previousData = null, lastQuestion = null, invalidEvidence = [], signal = AbortSignal.timeout(20_000) } = {}) => {
   if (!settings.apiKey) throw new Error("BOT_NOT_CONFIGURED");
+  signal.throwIfAborted();
   const response = await fetchImpl("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { Authorization: `Bearer ${settings.apiKey}`, "Content-Type": "application/json" },
@@ -110,10 +120,11 @@ export const analyzeConsultation = async (messages, { fetchImpl = fetch, setting
       ],
       text: { format: { type: "json_schema", name: "reku_consultation", strict: true, schema: intakeSchema } },
     }),
-    signal: AbortSignal.timeout(45_000),
+    signal,
   });
   if (!response.ok) throw new Error(`BOT_PROVIDER_${response.status}`);
   const body = await response.json();
+  signal.throwIfAborted();
   if (body.status !== "completed") throw new Error("BOT_INCOMPLETE_RESPONSE");
   const output = body.output?.flatMap((item) => item.content || []).filter((item) => item.type === "output_text").map((item) => item.text).join("");
   const data = JSON.parse(output || "null");
@@ -123,10 +134,17 @@ export const analyzeConsultation = async (messages, { fetchImpl = fetch, setting
   const grounded = (quote) => Boolean(normalize(quote)) && patientMessages.some(message => message.includes(normalize(quote)));
   // Repair a paraphrased citation internally; the patient should never have to
   // repeat information just because the extractor formatted its evidence badly.
-  const invalidCitations = data.complaints.flatMap((item, index) => evidenceKeys.filter(key => item[key] !== null && !grounded(item.evidence?.[key]))
+  const invalidCitations = data.complaints.flatMap((item, index) => evidenceKeys.filter(key => item?.[key] != null && !grounded(item.evidence?.[key]))
     .map(key => ({ complaintIndex: index, field: key, invalidQuote: item.evidence?.[key] ?? null })));
+  invalidCitations.push(...globalEvidenceKeys.filter(key => data[key] != null && !grounded(data.globalEvidence?.[key]))
+    .map(key => ({ field: key, invalidQuote: data.globalEvidence?.[key] ?? null })));
   if (!repairEvidence && invalidCitations.length) {
-    return analyzeConsultation(messages, { fetchImpl, settings, repairEvidence: true, previousData, lastQuestion, invalidEvidence: invalidCitations });
+    return analyzeConsultation(messages, { fetchImpl, settings, repairEvidence: true, previousData, lastQuestion, invalidEvidence: invalidCitations, signal });
+  }
+  data.globalEvidence = { ...data.globalEvidence };
+  for (const key of globalEvidenceKeys) {
+    if (typeof data[key] !== "string" || !grounded(data.globalEvidence[key])) { data[key] = null; data.globalEvidence[key] = null; }
+    else data[key] = data[key].slice(0, 1000);
   }
   for (const item of data.complaints) {
     if (!item || (item.pain !== null && (!Number.isFinite(item.pain) || item.pain < 0 || item.pain > 10))) throw new Error("BOT_INVALID_RESPONSE");
@@ -176,10 +194,16 @@ const audioTypes = new Map([
   ["audio/mpeg", "mp3"], ["audio/mp3", "mp3"], ["audio/wav", "wav"],
   ["audio/x-wav", "wav"], ["audio/ogg", "ogg"], ["audio/x-m4a", "m4a"],
 ]);
-export const transcribeConsultation = async (file, { fetchImpl = fetch, settings = botSettings } = {}) => {
-  const extension = audioTypes.get(file?.mimeType);
+export const transcribeConsultation = async (file, { fetchImpl = fetch, settings = botSettings, validateAudioImpl = validateConsultationAudio, signal: parentSignal, timeoutMs = 60_000 } = {}) => {
+  const deadline = AbortSignal.timeout(timeoutMs);
+  const signal = parentSignal ? AbortSignal.any([parentSignal, deadline]) : deadline;
+  let extension = audioTypes.get(file?.mimeType);
   if (!extension || !file.buffer?.length) throw Object.assign(new Error("BOT_AUDIO_TYPE"), { statusCode: 415 });
   if (file.buffer.length > 8 * 1024 * 1024) throw Object.assign(new Error("PAYLOAD_TOO_LARGE"), { statusCode: 413 });
+  signal.throwIfAborted();
+  file = await validateAudioImpl(file, { signal });
+  signal.throwIfAborted();
+  extension = audioTypes.get(file.mimeType);
   const form = new FormData();
   form.set("model", settings.transcriptionModel);
   form.set("language", "es");
@@ -188,10 +212,11 @@ export const transcribeConsultation = async (file, { fetchImpl = fetch, settings
   form.set("file", new Blob([file.buffer], { type: file.mimeType }), `consulta.${extension}`);
   const response = await fetchImpl("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST", headers: { Authorization: `Bearer ${settings.apiKey}` }, body: form,
-    signal: AbortSignal.timeout(60_000),
+    signal,
   });
   if (!response.ok) throw new Error(`BOT_AUDIO_PROVIDER_${response.status}`);
   const body = await response.json();
+  signal.throwIfAborted();
   const text = String(body.text || "").trim();
   if (!text || text.length > 12000) throw new Error("BOT_AUDIO_UNCLEAR");
   return text;

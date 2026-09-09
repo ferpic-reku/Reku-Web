@@ -4,6 +4,7 @@ import { config, isProduction } from './config.mjs';
 import { parseCookies } from './http.mjs';
 import { hashToken } from './security.mjs';
 import { agreementPrefixForRequest } from './agreement-resolution.mjs';
+import { decryptBotReport, encryptBotReport } from './consultation-bot-report-storage.mjs';
 
 export const botAccessCookieName = 'reku_bot_appointment';
 export const botAccessMessages = {
@@ -14,7 +15,7 @@ export const botAccessMessages = {
 };
 const fail = (code, statusCode = 403) => Object.assign(new Error(`BOT_ACCESS_${code.toUpperCase()}`), { statusCode, publicMessage: botAccessMessages[code] });
 export const consultationBotMode = (env = process.env) => {
-  const mode = env.CONSULTATION_BOT_MODE ?? 'test';
+  const mode = env.CONSULTATION_BOT_MODE ?? (env.APP_ENV === 'production' ? 'production' : 'test');
   if (!['test', 'production'].includes(mode)) throw Object.assign(new Error('BOT_ACCESS_MODE_INVALID'), { statusCode: 503 });
   return mode;
 };
@@ -30,7 +31,7 @@ export const requireBotAppointment = async (request, { token = parseCookies(requ
   if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token)) throw fail('required');
   const result = await execute(`
     SELECT link.id AS access_link_id, appointment.id AS appointment_id,
-      appointment.status, usage.completed_at,
+      appointment.status, usage.completed_at, (usage.report_encrypted IS NOT NULL) AS report_available,
       ((appointment.appointment_date + appointment.end_time) AT TIME ZONE $2) > NOW() AS current_appointment,
       CASE WHEN appointment.agreement_id IS NULL THEN ''
         ELSE COALESCE(NULLIF(agreement.subdomain_prefix, ''), agreement.slug) END AS agreement_prefix
@@ -63,12 +64,22 @@ export const beginBotAppointmentAction = async (request, appointmentId, kind, { 
   return { appointmentId, requestHash };
 });
 
-export const finishBotAppointmentAction = async (reservation, { completed = false, execute = query } = {}) => {
+export const finishBotAppointmentAction = async (reservation, { completed = false, reportPdf, execute = query } = {}) => {
   if (!reservation) return;
+  // Completion and its recoverable PDF are committed in the same SQL update.
+  const encrypted = completed ? encryptBotReport(reportPdf, reservation.appointmentId) : null;
   const result = await execute(`UPDATE consultation_bot_usage SET
     completed_at = CASE WHEN $3 THEN COALESCE(completed_at, NOW()) ELSE completed_at END,
+    report_encrypted = CASE WHEN $3 THEN $4 ELSE report_encrypted END,
     active_request_hash = NULL, active_until = NULL, updated_at = NOW()
     WHERE appointment_id = $1 AND active_request_hash = $2 RETURNING appointment_id`,
-  [reservation.appointmentId, reservation.requestHash, completed]);
+  [reservation.appointmentId, reservation.requestHash, completed, encrypted]);
   if (!result.rows.length && completed) throw fail('busy', 409);
+};
+
+export const readBotAppointmentReport = async (request, { execute = query } = {}) => {
+  const access = await requireBotAppointment(request, { allowCompleted: true, execute });
+  if (!access.completed_at || !access.report_available) throw Object.assign(new Error('BOT_REPORT_NOT_READY'), { statusCode: 409 });
+  const result = await execute('SELECT report_encrypted FROM consultation_bot_usage WHERE appointment_id = $1 AND completed_at IS NOT NULL', [access.appointment_id]);
+  return decryptBotReport(result.rows[0]?.report_encrypted, access.appointment_id);
 };

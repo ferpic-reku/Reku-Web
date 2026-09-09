@@ -18,7 +18,7 @@ export const formatConsultationReportValue = (value) => {
 
 export const consultationReportRows = (data) => (data?.complaints || []).map((item) => [
   ["Motivo", item.reason],
-  ["Zona / detalle", item.location],
+  ["Zona / detalle", [item.location, item.locationNote].filter(Boolean).join('. ')],
   ["Lado", item.side || (item.sideRequired ? "No informado" : "No aplica")],
   ["Inicio / antigüedad", item.onset],
   ["Cómo comenzó", item.mechanism],
@@ -67,7 +67,7 @@ export const renderConsultationReport = async (session, { narrative = fallbackCo
   doc.moveDown(0.35).font("Helvetica").fontSize(11).fillColor(muted).text("Entrevista previa de telerehabilitación kinésica");
   doc.moveDown(1.1);
   row("Fecha", new Date(session.updatedAt).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour12: false }));
-  row("Paciente", "Prueba sin datos de identificación ni turno asociado");
+  row(session.appointmentId ? "Turno" : "Paciente", session.appointmentId ? `Referencia ${session.appointmentId}` : "Prueba sin datos de identificación ni turno asociado");
   if (session.brand.slug) row("Acuerdo", `${session.brand.name} (${session.brand.slug})`);
   if (session.data?.urgent) {
     heading("Atención presencial urgente sugerida");
@@ -92,7 +92,7 @@ export const renderConsultationReport = async (session, { narrative = fallbackCo
     // Footers live outside the content margin; do not let PDFKit paginate them.
     const bottom = doc.page.margins.bottom;
     doc.page.margins.bottom = 0;
-    doc.font("Helvetica").fontSize(8).fillColor(muted).text(`REKU  ·  INFORME DE PRUEBA  ·  ${i + 1} / ${range.count}`, 48, 776, { width, lineBreak: false });
+    doc.font("Helvetica").fontSize(8).fillColor(muted).text(`REKU  ·  ${session.appointmentId ? 'INFORME PREVIO A LA CONSULTA' : 'INFORME DE PRUEBA'}  ·  ${i + 1} / ${range.count}`, 48, 776, { width, lineBreak: false });
     doc.page.margins.bottom = bottom;
   }
   doc.end();

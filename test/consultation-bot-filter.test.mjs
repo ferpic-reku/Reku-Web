@@ -22,12 +22,12 @@ function provider(outputs) {
   };
 }
 
-test("each followup stage has a 20 second timeout without bypassing review", async (t) => {
+test("followup stages share one 20 second deadline without bypassing review", async (t) => {
   const timeouts = [];
   t.mock.method(AbortSignal, "timeout", ms => { timeouts.push(ms); return new AbortController().signal; });
   const mock = provider([plan, draft, approved]);
   assert.ok(await chooseReviewedFollowup(data, messages, mock));
-  assert.deepEqual(timeouts, [20_000, 20_000, 20_000]);
+  assert.deepEqual(timeouts, [20_000]);
   assert.equal(mock.requests.at(-1).text.format.name, "reku_followup_review");
 });
 test("three independent stages use message IDs, semantic review and no literal quote requirement", async () => {
