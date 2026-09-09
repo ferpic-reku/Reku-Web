@@ -32,7 +32,6 @@
     $('send').disabled = busy || recording || !$('message').value.trim();
     $('message').disabled = busy || recording;
     $('record').disabled = busy;
-    $('attach').disabled = busy || recording;
     $('start').disabled = busy || !available || !$('consent').checked;
     $('typing').hidden = !busy || !session;
   };
@@ -135,11 +134,6 @@
     } catch (error) { showError(error.message); }
     finally { setBusy(false); $('message').focus(); }
   };
-  $('attach').addEventListener('click', () => $('audio-file').click());
-  $('audio-file').addEventListener('change', async () => {
-    const file = $('audio-file').files[0]; $('audio-file').value = '';
-    if (file) await transcribe(file);
-  });
   const stopRecording = (discard = false) => {
     discardRecording = discard;
     if (recorder?.state === 'recording') recorder.stop();
@@ -152,7 +146,7 @@
   };
   $('record').addEventListener('click', async () => {
     if (recorder?.state === 'recording') { stopRecording(); return; }
-    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { showError('Este navegador no permite grabar. Podés adjuntar un audio o escribir.'); return; }
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { showError('Este navegador no permite grabar. Podés escribir tu mensaje.'); return; }
     showError(); $('record').disabled = true;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -166,7 +160,7 @@
           transcribe(new File(chunks, `consulta.${mime.includes('mp4') ? 'm4a' : 'webm'}`, { type: mime }));
         }
       };
-      recorder.onerror = () => { stopRecording(true); showError('No pudimos grabar. Podés adjuntar un audio o escribir.'); };
+      recorder.onerror = () => { stopRecording(true); showError('No pudimos grabar. Podés intentar de nuevo o escribir tu mensaje.'); };
       recorder.start();
       const startedAt = Date.now(); $('timer').textContent = '0:00';
       recordTimer = setInterval(() => {
@@ -177,7 +171,7 @@
       $('recording-note').hidden = false; $('record-label').textContent = 'Terminar'; $('record').classList.add('recording');
       $('record').setAttribute('aria-label', 'Terminar grabación');
       $('record').setAttribute('title', 'Terminar grabación');
-    } catch { stream?.getTracks().forEach(track => track.stop()); showError('No pudimos acceder al micrófono. Revisá el permiso del navegador o adjuntá un audio.'); }
+    } catch { stream?.getTracks().forEach(track => track.stop()); showError('No pudimos acceder al micrófono. Revisá el permiso del navegador o escribí tu mensaje.'); }
     finally { updateControls(); }
   });
   $('cancel-recording').addEventListener('click', () => stopRecording(true));
