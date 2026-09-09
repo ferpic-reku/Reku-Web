@@ -69,7 +69,6 @@ export const renderConsultationReport = async (session, { narrative = fallbackCo
   row("Fecha", new Date(session.updatedAt).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour12: false }));
   row("Paciente", "Prueba sin datos de identificación ni turno asociado");
   if (session.brand.slug) row("Acuerdo", `${session.brand.name} (${session.brand.slug})`);
-  row("Estado", session.status === "complete" ? "Entrevista finalizada" : session.status === "urgent" ? "Entrevista interrumpida: se sugirió atención urgente" : "Informe parcial: datos pendientes");
   if (session.data?.urgent) {
     heading("Atención presencial urgente sugerida");
     row("Relato que motivó el aviso", session.data.urgentReason);

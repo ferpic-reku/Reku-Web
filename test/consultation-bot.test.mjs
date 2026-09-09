@@ -4,6 +4,13 @@ import { analyzeConsultation, nextConsultationStep, transcribeConsultation } fro
 import { requireBotOrigin, resolveBotBrand } from "../src/consultation-bot.mjs";
 import { serveStatic } from "../src/http.mjs";
 import { renderConsultationReport, formatConsultationReportValue } from "../src/consultation-bot-report.mjs";
+import { readFile } from "node:fs/promises";
+
+test("PDF header omits Estado while retaining urgent guidance", async () => {
+  const source = await readFile(new URL('../src/consultation-bot-report.mjs', import.meta.url), 'utf8');
+  assert.ok(!/row\("Estado"/.test(source));
+  assert.match(source, /Atención presencial urgente sugerida/);
+});
 
 test("PDF values capitalize only their initial character without changing numbers or remaining text", () => {
   for (const [value, expected] of [

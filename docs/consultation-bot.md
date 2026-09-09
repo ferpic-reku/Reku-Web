@@ -6,6 +6,8 @@ El bot obtiene el acuerdo exclusivamente del subdominio registrado: `https://ypf
 
 ## Informe PDF
 
+El encabezado no muestra la fila «Estado». Se conserva la orientación urgente cuando corresponda. El motivo se normaliza como descripción con zona anatómica («Torcedura de tobillo», no «Me torcí») sin inferir un diagnóstico como esguince. Las citas que lo respaldan siguen siendo literales. En respuestas breves, «Caminando» a cómo ocurrió no equivale a una causa desconocida: una etiqueta «No informado» sin evidencia de desconocimiento no puede borrar un mecanismo conocido ni imponerse sobre la respuesta concreta a la última pregunta. Ante esa contradicción se conserva el texto literal del paciente, sin inventar el dato.
+
 El logo del acuerdo se presenta en un área de 126 × 35 puntos (30 % menor), sin cambiar el de Reku. Después de los datos de cabecera se muestra «El relato del paciente»: un párrafo hilado en tercera persona, identificado como síntesis, no cita textual. Luego aparecen los datos tabulados. No se repiten las preguntas y respuestas en una sección «Detalles adicionales del relato»; las respuestas adicionales se integran al relato, también en la alternativa sin reescritura de IA. Se elimina la sección «Contexto para la consulta»; los antecedentes y objetivos efectivamente referidos se integran en el relato.
 
 En la pantalla final sólo se muestra que el informe está listo y el botón para descargarlo. No se vuelve a listar información clínica ni preguntas y respuestas. El historial del chat se conserva, incluida cualquier orientación urgente, y los informes parciales se identifican como tales.

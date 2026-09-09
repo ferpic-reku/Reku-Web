@@ -4,6 +4,13 @@ import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import vm from 'node:vm';
 
+test('audio button stays light green before recording and when ready to send', async () => {
+  const css = await readFile(new URL('../bot/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /#record\{[^}]*background:#e0f3e8;[^}]*color:#236747;/);
+  assert.match(css, /#record\.recording\{background:#e0f3e8;color:#236747\}/);
+  assert.match(css, /#record:not\(:disabled\):hover\{background:#cdebd9\}/);
+});
+
 const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {}, autoStart = true, resetFails = false } = {}) => {
   let focused;
   const element = tagName => ({

@@ -4,6 +4,10 @@ import { chooseReviewedFollowup, MAX_CONSULTATION_FOLLOWUPS } from "./consultati
 const fields = ["reason", "location", "side", "onset", "mechanism", "pain", "limitations"];
 const normalize = value => String(value || "").normalize("NFC").toLowerCase().replace(/\s+/g, " ").trim();
 const quotedIn = (quote, text) => Boolean(normalize(quote)) && normalize(text).includes(normalize(quote));
+const unknownMechanism = value => /^no informado:/i.test(value || "");
+// A literal citation proves that words exist, not that they express uncertainty.
+// If a model labels a concrete answer as unknown, keep the answer itself.
+const expressesUncertainty = value => /\b(?:no (?:lo )?(?:recuerdo|se|sé|me acuerdo|puedo precisar|sabría|sabria)|no estoy segur[oa]|prefiero no|no (?:quiero|deseo) (?:decir|responder|contestar))/i.test(value || "");
 
 // A missing model field is not a withdrawal of a previously verified fact.
 // Stable ids prevent extraction order from moving answers between complaints.
@@ -11,7 +15,9 @@ export function mergeConsultationData(previous, extracted, latestText, lastQuest
   const complaints = structuredClone(previous?.complaints || []);
   const seen = new Set();
   const currentMechanisms = new Set();
-  for (const incoming of extracted.complaints) {
+  for (const raw of extracted.complaints) {
+    const incoming = unknownMechanism(raw.mechanism) && !expressesUncertainty(raw.evidence?.mechanism)
+      ? { ...raw, mechanism: null, mechanismClear: false } : raw;
     let item = complaints.find(existing => incoming.id && existing.id === incoming.id);
     if (!item && incoming.id) continue; // Never accept an invented existing id.
     if (!item) item = complaints.find(existing => normalize(existing.location) === normalize(incoming.location) && normalize(existing.side) === normalize(incoming.side));
@@ -58,7 +64,8 @@ export function mergeConsultationData(previous, extracted, latestText, lastQuest
     } else if (field === "mechanism") {
       // Prefer the full, grounded extraction over a short lastAnswer ("fútbol").
       // An answered clarification is terminal even if the patient cannot add detail.
-      if (!currentMechanisms.has(target.id)) target.mechanism = answer.value.slice(0, 1000);
+      const value = unknownMechanism(answer.value) && !expressesUncertainty(answer.evidence) ? answer.evidence : answer.value;
+      if (!currentMechanisms.has(target.id) || (unknownMechanism(target.mechanism) && !unknownMechanism(value))) target.mechanism = value.slice(0, 1000);
       target.mechanismClear = true;
     } else {
       target[field] = answer.value.slice(0, 1000);

@@ -65,6 +65,34 @@ test("a patient who cannot clarify the mechanism is not asked indefinitely", asy
   assert.equal(turn.next.complete, true);
   assert.equal(turn.data.complaints[0].mechanismClear, true);
 });
+test("Caminando cannot become no recuerda even if the model labels its literal citation as unknown", () => {
+  const previous = state([complaint("c1", { mechanism: "torcedura", mechanismClear: false })]);
+  const extracted = state([complaint("c1", { mechanism: "No informado: no recuerda", evidence: { mechanism: "Caminando" } })]);
+  extracted.lastAnswer = { status: "answered", value: "No informado: no recuerda", evidence: "Caminando" };
+  const data = mergeConsultationData(previous, extracted, "Caminando", { field: "mechanism", complaintId: "c1" });
+  assert.equal(data.complaints[0].mechanism, "Caminando");
+  assert.equal(data.complaints[0].mechanismClear, true);
+  assert.equal(data.complaints[0].evidence.mechanism, "Caminando");
+  const next = state([complaint("c1", { mechanism: "No informado: no recuerda", evidence: { mechanism: "Me cuesta subir escaleras" } })]);
+  const later = mergeConsultationData(data, next, "Me cuesta subir escaleras", { field: "followup", complaintId: "c1" });
+  assert.equal(later.complaints[0].mechanism, "Caminando");
+});
+test("a correct direct mechanism answer takes precedence over a contradictory unknown extraction", () => {
+  const extracted = state([complaint("c1", { mechanism: "No informado: no recuerda", evidence: { mechanism: "Caminando" } })]);
+  extracted.lastAnswer = { status: "answered", value: "Caminando", evidence: "Caminando" };
+  const data = mergeConsultationData(state(), extracted, "Caminando", { field: "mechanism", complaintId: "c1" });
+  assert.equal(data.complaints[0].mechanism, "Caminando");
+});
+test("an explicit unknown cause or refusal stays unknown without changing other complaints", () => {
+  for (const text of ["No recuerdo", "Prefiero no responder", "Me resulta imposible precisar ese momento"]) {
+    const extracted = state([]);
+    extracted.lastAnswer = { status: "answered", value: "No informado: no recuerda", evidence: text };
+    const data = mergeConsultationData(state([complaint(), complaint("c2")]), extracted, text, { field: "mechanism", complaintId: "c1" });
+    assert.ok(/No informado:|Me resulta imposible/.test(data.complaints[0].mechanism));
+    assert.equal(data.complaints[0].mechanismClear, true);
+    assert.equal(data.complaints[1].mechanism, "jugando al fútbol");
+  }
+});
 test("screenshot sequence clarifies ambiguous no once, then continues without repeating onset or mechanism", async () => {
   const session = { data: state([complaint("c1", { mechanism: null }), complaint("c2", { location: "espalda baja", pain: null })]), version: 2,
     lastQuestion: { complaintId: "c1", field: "mechanism", key: "c1.mechanism", text: "¿Hubo golpe, esfuerzo, apareció de a poco o no recordás?" } };

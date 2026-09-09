@@ -2,7 +2,7 @@
 // node --env-file=.env scripts/eval-consultation-mechanism.mjs
 import assert from "node:assert/strict";
 import { analyzeConsultation, nextConsultationStep } from "../src/consultation-bot-ai.mjs";
-import { mergeConsultationData } from "../src/consultation-bot-conversation.mjs";
+import { mergeConsultationData, advanceConsultation } from "../src/consultation-bot-conversation.mjs";
 
 const cases = [
   { id: "football_context", text: "Hace dos meses me torcí el tobillo izquierdo jugando al fútbol. Ahora al caminar me duele 5 de 10.", pattern: /f[uú]tbol/i, clear: true },
@@ -40,3 +40,21 @@ for (const fixture of cases) {
   }
   console.log(JSON.stringify({ fixture: fixture.id, passed: true, mechanism: item.mechanism, mechanismClear: item.mechanismClear }));
 }
+
+// Scripted followup isolates extraction/merge from optional question selection.
+let session = { data: null, version: 0 };
+const messages = [];
+let followups = 0;
+const chooseFollowup = async () => followups++ === 0 ? { complaintId: 'c1', topic: 'actividades', kind: 'activity_impact', question: '¿Qué actividad habitual te cuesta por esta molestia?', answer: null } : null;
+for (const text of ['Me torcí el tobillo derecho hace 1 mes. Me duele 6 de 10.', 'Caminando', 'Me cuesta subir escaleras']) {
+  messages.push({ role: 'user', text });
+  const turn = await advanceConsultation(session, messages, { chooseFollowup });
+  session = { data: turn.data, lastQuestion: turn.next, version: session.version + 1 };
+  messages.push({ role: 'assistant', text: turn.next.text });
+}
+assert.match(session.data.complaints[0].reason, /^torcedura de tobillo/i);
+assert.match(session.data.complaints[0].mechanism, /caminando/i);
+assert.ok(!/no informado|no recuerda/i.test(session.data.complaints[0].mechanism));
+assert.match(session.data.complaints[0].limitations, /escaleras/i);
+assert.equal(session.lastQuestion.complete, true);
+console.log(JSON.stringify({ fixture: 'walking_then_stairs', passed: true, reason: session.data.complaints[0].reason, mechanism: session.data.complaints[0].mechanism }));
