@@ -147,6 +147,7 @@
     clearInterval(recordTimer); $('recording-note').hidden = true;
     $('record-label').textContent = 'Grabar audio'; $('record').classList.remove('recording');
     $('record').setAttribute('aria-label', 'Grabar audio');
+    $('record').setAttribute('title', 'Grabar audio');
     updateControls();
   };
   $('record').addEventListener('click', async () => {
@@ -173,8 +174,9 @@
         $('timer').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
         if (seconds >= 120) stopRecording();
       }, 500);
-      $('recording-note').hidden = false; $('record-label').textContent = 'Detener'; $('record').classList.add('recording');
-      $('record').setAttribute('aria-label', 'Detener grabación');
+      $('recording-note').hidden = false; $('record-label').textContent = 'Terminar'; $('record').classList.add('recording');
+      $('record').setAttribute('aria-label', 'Terminar grabación');
+      $('record').setAttribute('title', 'Terminar grabación');
     } catch { stream?.getTracks().forEach(track => track.stop()); showError('No pudimos acceder al micrófono. Revisá el permiso del navegador o adjuntá un audio.'); }
     finally { updateControls(); }
   });
