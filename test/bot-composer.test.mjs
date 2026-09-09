@@ -120,17 +120,20 @@ const setup = async ({ audioLevel = 0.02, search = '', hash = '', sessionOverrid
 
 test('consent and Comenzar live below the steps, outside the initially hidden chat', async () => {
   const html = await readFile(new URL('../bot/index.html', import.meta.url), 'utf8');
-  const intro = html.match(/<aside class="intro">([\s\S]*?)<\/aside>/)[1];
+  const intro = html.match(/<aside class="intro" id="intro">([\s\S]*?)<\/aside>/)[1];
   assert.match(intro, /id="step-report"[\s\S]*id="start-panel"[\s\S]*id="consent"[\s\S]*id="start"[^>]*>Comenzar/);
   assert.match(html, /id="chat-card"[^>]* hidden>/);
   assert.match(intro, /Este asistente usa OpenAI para procesar tu texto y transcribir tus audios\. Organiza tu relato; no realiza diagnósticos ni indica tratamientos\./);
   assert.doesNotMatch(html, /La conversación queda disponible/);
+  const css = await readFile(new URL('../bot/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.layout:not\(\.awaiting-start\)\{display:block;max-width:820px;margin:0 auto\}/);
 });
 
 test('chat opens only after consent and its second greeting arrives exactly two seconds later', async () => {
   const messages = [{ role: 'assistant', text: 'Hola, bienvenido' }, { role: 'assistant', text: 'Podés mandar un audio' }];
   const app = await setup({ autoStart: false, sessionOverrides: { messages } });
   assert.equal(app.get('chat-card').hidden, true);
+  assert.equal(app.get('intro').hidden, false);
   await app.get('start').handlers.click();
   assert.equal(app.urls.includes('/api/bot/session'), false);
   app.get('consent').checked = true;
@@ -138,6 +141,7 @@ test('chat opens only after consent and its second greeting arrives exactly two 
   assert.equal(app.get('start').disabled, false);
   await app.get('start').handlers.click();
   assert.equal(app.get('chat-card').hidden, false);
+  assert.equal(app.get('intro').hidden, true);
   assert.equal(app.get('start-panel').hidden, true);
   assert.equal(app.get('messages').children.length, 1);
   assert.equal(app.get('record').disabled, true);
@@ -176,6 +180,7 @@ for (const status of ['complete', 'partial', 'urgent']) test('finished ' + statu
   const data = { complaints: [{ reason: 'dolor', location: 'tobillo derecho', pain: 5 }], followups: [{ question: '¿Cambió tu rutina?', answer: 'Me cuesta caminar' }] };
   const app = await setup({ sessionOverrides: { status, data, messages: [{ role: 'assistant', text: 'Mensaje de cierre u orientación' }] } });
   assert.equal(app.get('result').hidden, false);
+  assert.equal(app.get('intro').hidden, true);
   assert.equal(app.get('composer').hidden, true);
   assert.equal(app.get('result-title').textContent, status === 'partial' ? 'Tu informe parcial está listo' : 'Tu informe está listo');
   assert.equal(typeof app.get('download').handlers.click, 'function');

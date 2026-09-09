@@ -67,6 +67,7 @@
     $('access-notice').textContent = accessMessage;
     $('messages').hidden = Boolean(accessMessage);
     $('chat-card').hidden = !session || Boolean(accessMessage);
+    $('intro').hidden = Boolean(session) && !accessMessage;
     $('layout').classList.toggle('awaiting-start', !session);
     const messages = session?.messages || [];
     renderMessages(welcoming ? messages.slice(0, 1) : messages);
