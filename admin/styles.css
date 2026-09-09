@@ -945,6 +945,54 @@ tr:hover td {
   background: #fbfdfe;
 }
 
+.appointment-row-cancelled td {
+  color: #b42318;
+  background: #fff1f0;
+}
+
+.appointment-row-cancelled:hover td {
+  background: #ffe4e1;
+}
+
+.appointment-row-cancelled .icon-button {
+  color: #b42318;
+  border-color: #f3b9b3;
+}
+
+.appointment-cancelled-label {
+  color: #b42318;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.appointment-row-status {
+  display: block;
+  margin-top: 4px;
+}
+
+.appointment-detail-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+  min-width: 0;
+}
+
+.appointment-cancellation-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  color: #b42318;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.appointment-detail-heading + .icon-button {
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;

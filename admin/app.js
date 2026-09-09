@@ -1163,7 +1163,15 @@
         <div class="modal-backdrop">
           <div class="modal-panel modal-panel-wide" role="dialog" aria-modal="true">
             <div class="modal-header">
-              <h2>Detalle del turno</h2>
+              <div class="appointment-detail-heading">
+                <h2>Detalle del turno</h2>
+                ${appointment.status === 'cancelled' ? `
+                  <div class="appointment-cancellation-summary">
+                    <strong class="appointment-cancelled-label">CANCELADO</strong>
+                    <span>${escapeHtml(appointment.cancellation_reason || 'Sin motivo informado')}</span>
+                  </div>
+                ` : ''}
+              </div>
               <button type="button" class="icon-button" data-action="close-dialog" aria-label="Cerrar">×</button>
             </div>
             <div class="detail-grid appointment-detail-grid ${detailPaymentClass}">
@@ -2195,9 +2203,10 @@
   }
 
   function renderAppointmentRow(item) {
+    const isCancelled = item.status === 'cancelled';
     return `
-      <tr>
-        <td>${escapeHtml(item.appointment_date)}</td>
+      <tr${isCancelled ? ' class="appointment-row-cancelled"' : ''}>
+        <td>${escapeHtml(item.appointment_date)}${isCancelled ? '<span class="appointment-cancelled-label appointment-row-status">CANCELADO</span>' : ''}</td>
         <td>${escapeHtml(item.start_time)} - ${escapeHtml(item.end_time)}</td>
         <td>${escapeHtml(item.service_name)}</td>
         <td>${escapeHtml(item.professional_name)}</td>
