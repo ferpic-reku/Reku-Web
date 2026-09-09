@@ -4,7 +4,8 @@ import { getClientIp, parseCookies, readBody, sendJson, withSecurityHeaders } fr
 import { requestIdentifiesAgreement, resolveAgreementForRequest } from "./agreement-resolution.mjs";
 import { consumeRateLimit } from "./rate-limit.mjs";
 import { parseMultipartForm } from "./uploads.mjs";
-import { analyzeConsultation, nextConsultationStep, transcribeConsultation, botSettings } from "./consultation-bot-ai.mjs";
+import { transcribeConsultation, botSettings } from "./consultation-bot-ai.mjs";
+import { advanceConsultation } from "./consultation-bot-conversation.mjs";
 import { loadBotBrandLogo, renderConsultationReport } from "./consultation-bot-report.mjs";
 
 export const welcomeMessages = [
@@ -108,14 +109,14 @@ export const handleConsultationBot = async (request, response, url) => {
         if (!text || text.length > 4000) throw fail("Escribí un mensaje de hasta 4000 caracteres.");
         await enforceAIQuota(request);
         const messages = [...session.messages, { role: "user", text }];
-        const data = await analyzeConsultation(messages);
-        const next = nextConsultationStep(data);
+        const { data, next } = await advanceConsultation(session, messages);
         const exhausted = session.version >= 24;
         const reply = exhausted && !next.complete && !next.urgent
           ? "Gracias por tu tiempo. Dejamos un informe parcial con lo que nos contaste y los datos pendientes para revisar con el profesional. Podés descargarlo acá abajo."
           : next.text;
         session.messages = [...messages, { role: "assistant", text: reply }];
         session.data = data;
+        session.lastQuestion = next;
         session.status = next.urgent ? "urgent" : next.complete ? "complete" : exhausted ? "partial" : "collecting";
         session.version++;
         session.lastRequestId = body.requestId;

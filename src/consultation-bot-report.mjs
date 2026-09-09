@@ -72,10 +72,27 @@ export const renderConsultationReport = async (session) => {
     heading(complaints.length > 1 ? `Motivo ${index + 1}` : "Lo que nos cuenta el paciente");
     rows.forEach(([label, value]) => row(label, value));
   });
+  const followups = (session.data?.followups || []).filter(item => item.answer !== null);
+  if (followups.length) {
+    heading("Detalles adicionales del relato");
+    followups.forEach((item, index) => {
+      const complaint = session.data.complaints.find(complaint => complaint.id === item.complaintId);
+      row("Molestia consultada", complaint?.location);
+      row(`Pregunta ${index + 1}`, item.question);
+      // Chunk long verbatim responses so a single row cannot overrun a page.
+      const parts = String(item.answer).match(/[\s\S]{1,699}(?:\s|$)|\S{1,700}/g) || ["No informado"];
+      parts.forEach((part, partIndex) => row(partIndex ? "Respuesta (continuación)" : "Respuesta del paciente (textual)", part));
+    });
+  }
+  // Keep the final context and notice together when short, away from footers.
+  if (doc.y + 170 > 755) doc.addPage();
   heading("Contexto para la consulta");
   row("Atención / antecedentes referidos", session.data?.priorCare);
   row("Objetivo del paciente", session.data?.goal);
-  doc.moveDown(0.8).font("Helvetica").fontSize(9).fillColor(muted).text("Resumen asistido por IA a partir del relato del paciente. No constituye un diagnóstico, una indicación de tratamiento ni una evaluación de aptitud para telerehabilitación. Los datos no informados y las incertidumbres requieren revisión del profesional. No se realizó un descarte completo de signos de alarma.", 48, doc.y, { width, lineGap: 3 });
+  const notice = "Resumen asistido por IA a partir del relato del paciente. No constituye un diagnóstico, una indicación de tratamiento ni una evaluación de aptitud para telerehabilitación. Los datos no informados y las incertidumbres requieren revisión del profesional. No se realizó un descarte completo de signos de alarma.";
+  doc.font("Helvetica").fontSize(9);
+  if (doc.y + 12 + doc.heightOfString(notice, { width, lineGap: 3 }) > 755) doc.addPage();
+  doc.moveDown(0.8).fillColor(muted).text(notice, 48, doc.y, { width, lineGap: 3 });
   const range = doc.bufferedPageRange();
   for (let i = 0; i < range.count; i++) {
     doc.switchToPage(i);

@@ -25,7 +25,7 @@
     const response = await fetch(`/api/bot/${path}${suffix}`, {
       credentials: 'same-origin', cache: 'no-store',
       ...(body ? { method: 'POST', body: body instanceof FormData ? body : JSON.stringify(body), headers: body instanceof FormData ? {} : { 'Content-Type': 'application/json' } } : {}),
-      signal: AbortSignal.timeout(75_000),
+      signal: AbortSignal.timeout(125_000),
     });
     const data = await response.json().catch(() => { throw new Error('No pudimos conectar con el asistente. Intentá de nuevo en unos segundos.'); });
     if (!response.ok) throw new Error(data.error || 'No pudimos completar la solicitud. Intentá de nuevo.');
@@ -89,6 +89,13 @@
         row(list, 'Desde cuándo', item.onset);
         row(list, 'Cómo empezó', item.mechanism);
         row(list, 'Dolor actual', item.pain !== null ? `${item.pain}/10` : item.painNote);
+        $('summary').append(list);
+      });
+      (session.data.followups || []).filter(item => item.answer !== null).forEach(item => {
+        const list = document.createElement('dl');
+        const complaint = session.data.complaints.find(complaint => complaint.id === item.complaintId);
+        row(list, 'Detalle adicional sobre', complaint?.location);
+        row(list, item.question, item.answer);
         $('summary').append(list);
       });
       $('result').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
