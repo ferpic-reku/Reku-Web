@@ -57,7 +57,7 @@ export const ensureAppointmentTriage = async (
         name: appointment.intake_first_name || fallback.name,
         familyName: appointment.intake_family_name || fallback.familyName,
         patientExternalId: `REKU-APT-${String(appointment.id).padStart(6, "0")}`,
-        centro: appointment.agreement_slug,
+        center: appointment.agreement_slug,
       });
       await client.query(
         `

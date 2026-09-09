@@ -33,7 +33,7 @@ test("ReHub payload uses RSA OAEP SHA-256 and the documented action", () => {
       name: "Ana",
       familyName: "Pérez",
       patientExternalId: "REKU-APT-000123",
-      centro: "cokiba",
+      center: "cokiba",
       lang: "es",
     },
     publicKey,
@@ -47,7 +47,7 @@ test("ReHub payload uses RSA OAEP SHA-256 and the documented action", () => {
       name: "Ana",
       familyName: "Pérez",
       patientExternalId: "REKU-APT-000123",
-      centro: "cokiba",
+      center: "cokiba",
       lang: "es",
     },
     timestamp: 1_787_046_797,
@@ -62,7 +62,7 @@ test("ReHub request posts the encrypted data envelope to the full triage endpoin
     name: "Ana",
     familyName: "Pérez",
     patientExternalId: "REKU-APT-000123",
-    centro: "cokiba",
+    center: "cokiba",
     lang: "es",
     baseUrl: "https://api.example.test/dev2",
     clientId: "test-client",
@@ -98,7 +98,8 @@ test("ReHub request posts the encrypted data envelope to the full triage endpoin
     decryptBody(encryptedHex).data.patientExternalId,
     "REKU-APT-000123",
   );
-  assert.equal(decryptBody(encryptedHex).data.centro, "cokiba");
+  assert.equal(decryptBody(encryptedHex).data.center, "cokiba");
+  assert.equal(Object.hasOwn(decryptBody(encryptedHex).data, "centro"), false);
   assert.equal(
     result.url,
     "https://patient-dev2.rehub.cloud/opentriage/example",
@@ -109,7 +110,7 @@ test("ReHub response URL must stay on HTTPS rehub.cloud", async () => {
   await assert.rejects(
     requestPatientTriage({
       patientExternalId: "REKU-APT-000123",
-      centro: "cokiba",
+      center: "cokiba",
       baseUrl: "https://api.example.test/dev2",
       clientId: "test-client",
       publicKey,
@@ -126,7 +127,7 @@ test("ReHub response URL must stay on HTTPS rehub.cloud", async () => {
   );
 });
 
-test("Appointment triage sends the agreement entry slug as centro", async () => {
+test("Appointment triage sends the agreement entry slug as center", async () => {
   const source = await readFile(
     new URL("../src/appointment-triage.mjs", import.meta.url),
     "utf8",
@@ -136,5 +137,5 @@ test("Appointment triage sends the agreement entry slug as centro", async () => 
     source,
     /COALESCE\(NULLIF\(a\.agreement_slug_snapshot, ''\), agreement\.slug, ''\) AS agreement_slug/,
   );
-  assert.match(source, /centro: appointment\.agreement_slug/);
+  assert.match(source, /center: appointment\.agreement_slug/);
 });
