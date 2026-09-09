@@ -21,6 +21,7 @@ const setup = async ({ audioLevel = 0.02 } = {}) => {
   let resolveRequest;
   const requests = [];
   const audioRequests = [];
+  const diagnostics = [];
   const timers = new Map();
   let timerId = 0;
   class AudioContext {
@@ -46,6 +47,7 @@ const setup = async ({ audioLevel = 0.02 } = {}) => {
     location: { search: '' }, window: { addEventListener() {}, AudioContext, MediaRecorder },
     navigator: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } },
     MediaRecorder, File, Blob,
+    console: { info: (...args) => diagnostics.push(args) },
     setInterval: (callback, ms) => { timers.set(++timerId, { callback, ms }); return timerId; },
     clearInterval: id => timers.delete(id),
     URLSearchParams, URL, FormData, AbortSignal, crypto: { randomUUID },
@@ -64,11 +66,29 @@ const setup = async ({ audioLevel = 0.02 } = {}) => {
   const submit = () => get('composer').handlers.submit({ preventDefault() {} });
   get('composer').requestSubmit = submit;
   return {
-    get, submit, requests, audioRequests, focused: () => focused,
+    get, submit, requests, audioRequests, diagnostics, focused: () => focused,
     sampleAudio: () => { for (const timer of timers.values()) if (timer.ms === 50) for (let i = 0; i < 6; i++) timer.callback(); },
-    finish: (ok = true) => resolveRequest(response(ok ? { session: { ...session, version: 1 } } : { error: 'Error de prueba' }, ok)),
+    finish: (ok = true, overrides = {}) => resolveRequest(response(ok ? { session: { ...session, version: 1, ...overrides } } : { error: 'Error de prueba' }, ok)),
   };
 };
+
+test('browser diagnostics contain only this turn decision and its non-authenticating reference', async () => {
+  const app = await setup();
+  app.get('message').value = 'Relato privado del paciente';
+  const pending = app.submit();
+  app.finish(true, { diagnosticId: 'qa-reference', followupDiagnostics: [
+    { turn: 0, stage: 'review', reason: 'accepted' },
+    { turn: 1, stage: 'review', reason: 'review_rejected', failedChecks: ['clear'] },
+  ] });
+  await pending;
+  assert.equal(app.diagnostics.length, 1);
+  const diagnostic = JSON.parse(JSON.stringify(app.diagnostics[0][1]));
+  assert.equal(diagnostic.diagnosticId, 'qa-reference');
+  assert.equal(diagnostic.decisions.length, 1);
+  assert.equal(diagnostic.decisions[0].turn, 1);
+  assert.ok(!JSON.stringify(app.diagnostics).includes('Relato privado'));
+  assert.ok(!JSON.stringify(app.diagnostics).includes('test-instance'));
+});
 
 test('sending clears and focuses the composer immediately while preserving the next draft', async () => {
   const app = await setup();

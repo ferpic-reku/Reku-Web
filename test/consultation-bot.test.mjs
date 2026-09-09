@@ -53,6 +53,29 @@ test("extraction rejects fields without literal patient evidence and disables pr
 test("audio rejects unsupported types before contacting the provider", async () => {
   await assert.rejects(transcribeConsultation({ mimeType: "text/plain", buffer: Buffer.from("hello") }), /BOT_AUDIO_TYPE/);
 });
+test("evidence repair identifies the exact invalid field instead of making the patient repeat it", async () => {
+  const requests = [];
+  const data = complete();
+  data.complaints[0] = { ...data.complaints[0], reason: "dolor", location: "rodilla derecha", onset: "ayer", mechanism: "golpe", pain: 4,
+    evidence: { reason: "dolor", location: "rodilla derecha", side: "derecha", onset: "ayer", mechanism: "golpe", pain: "4", limitations: null } };
+  const result = await analyzeConsultation([{ role: "user", text: "Me duele la rodilla derecha desde ayer por un golpe, 4 de 10." }], {
+    settings: { apiKey: "test", model: "test" }, fetchImpl: async (_url, options) => {
+      const request = JSON.parse(options.body);
+      requests.push(request);
+      const output = structuredClone(data);
+      if (requests.length === 2) {
+        assert.match(request.input[0].content, /\"field\":\"reason\",\"invalidQuote\":\"dolor\"/);
+        assert.match(request.instructions, /evidence.reason/);
+        output.complaints[0].evidence.reason = "Me duele";
+      }
+      return { ok: true, json: async () => ({ status: "completed", output: [{ content: [{ type: "output_text", text: JSON.stringify(output) }] }] }) };
+    },
+  });
+  assert.equal(requests.length, 2);
+  assert.equal(result.complaints[0].reason, "dolor");
+  assert.equal(result.complaints[0].evidence.reason, "Me duele");
+  assert.equal(nextConsultationStep(result).complete, true);
+});
 
 test("a paraphrased side citation is repaired without asking the patient again", async () => {
   const data = complete();

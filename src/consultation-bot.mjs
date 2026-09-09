@@ -25,6 +25,7 @@ const fail = (message, statusCode = 422) => Object.assign(new Error(message), { 
 const present = (session) => ({
   messages: session.messages, data: session.data, brand: session.brand, status: session.status,
   expiresAt: session.expiresAt, version: session.version, instanceId: session.instanceId,
+  diagnosticId: session.diagnosticId, followupDiagnostics: session.followupDiagnostics || [],
 });
 export const requireBotOrigin = (request) => {
   let origin;
@@ -76,6 +77,7 @@ export const handleConsultationBot = async (request, response, url) => {
         createdAt: Date.now(), updatedAt: Date.now(), expiresAt: Date.now() + ttl,
         version: 0, lastRequestId: null, audioCount: 0,
         instanceId: randomBytes(12).toString("hex"),
+        diagnosticId: randomBytes(6).toString("hex"), followupDiagnostics: [],
         messages: welcomeMessages.map((text) => ({ role: "assistant", text })),
       };
       sessions.set(id, session);
@@ -109,7 +111,8 @@ export const handleConsultationBot = async (request, response, url) => {
         if (!text || text.length > 4000) throw fail("Escribí un mensaje de hasta 4000 caracteres.");
         await enforceAIQuota(request);
         const messages = [...session.messages, { role: "user", text }];
-        const { data, next } = await advanceConsultation(session, messages);
+        const diagnostics = [];
+        const { data, next } = await advanceConsultation(session, messages, { onFollowupDecision: event => diagnostics.push({ ...event, turn: session.version + 1 }) });
         const exhausted = session.version >= 24;
         const reply = exhausted && !next.complete && !next.urgent
           ? "Gracias por tu tiempo. Dejamos un informe parcial con lo que nos contaste y los datos pendientes para revisar con el profesional. Podés descargarlo acá abajo."
@@ -117,6 +120,8 @@ export const handleConsultationBot = async (request, response, url) => {
         session.messages = [...messages, { role: "assistant", text: reply }];
         session.data = data;
         session.lastQuestion = next;
+        session.followupDiagnostics = [...(session.followupDiagnostics || []), ...diagnostics].slice(-5);
+        for (const event of diagnostics) console.info("Consultation bot followup decision", { diagnosticId: session.diagnosticId, ...event });
         session.status = next.urgent ? "urgent" : next.complete ? "complete" : exhausted ? "partial" : "collecting";
         session.version++;
         session.lastRequestId = body.requestId;

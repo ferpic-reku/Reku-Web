@@ -126,6 +126,8 @@
     updateControls(); $('message').focus();
     try {
       session = (await api('message', pendingMessage)).session;
+      const decisions = (session.followupDiagnostics || []).filter(item => item.turn === session.version);
+      if (decisions.length) console.info('Reku: control de preguntas adicionales', { diagnosticId: session.diagnosticId, decisions });
       pendingMessage = null;
       render();
     } catch (error) {

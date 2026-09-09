@@ -64,7 +64,7 @@ export function mergeConsultationData(previous, extracted, latestText, lastQuest
   };
 }
 
-export async function advanceConsultation(session, messages, { analyze = analyzeConsultation, chooseFollowup = chooseReviewedFollowup } = {}) {
+export async function advanceConsultation(session, messages, { analyze = analyzeConsultation, chooseFollowup = chooseReviewedFollowup, onFollowupDecision = () => {} } = {}) {
   const latestText = messages.at(-1).text;
   const lastQuestion = session.lastQuestion;
   const extracted = await analyze(messages, { previousData: session.data, lastQuestion });
@@ -91,7 +91,7 @@ export async function advanceConsultation(session, messages, { analyze = analyze
   }
   const next = nextConsultationStep(data);
   if (!next.complete || session.version >= 24 || data.followups.length >= 2) return { data, next };
-  const followup = await chooseFollowup(data, messages);
+  const followup = await chooseFollowup(data, messages, { onDecision: onFollowupDecision });
   if (!followup) return { data, next };
   data.followups.push(followup);
   return { data, next: { key: `followup.${data.followups.length}`, field: "followup", complaintId: followup.complaintId,
