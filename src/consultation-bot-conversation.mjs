@@ -1,5 +1,5 @@
 import { analyzeConsultation, nextConsultationStep } from "./consultation-bot-ai.mjs";
-import { chooseReviewedFollowup } from "./consultation-bot-followups.mjs";
+import { chooseReviewedFollowup, MAX_CONSULTATION_FOLLOWUPS } from "./consultation-bot-followups.mjs";
 
 const fields = ["reason", "location", "side", "onset", "mechanism", "pain", "limitations"];
 const normalize = value => String(value || "").normalize("NFC").toLowerCase().replace(/\s+/g, " ").trim();
@@ -90,7 +90,7 @@ export async function advanceConsultation(session, messages, { analyze = analyze
     }
   }
   const next = nextConsultationStep(data);
-  if (!next.complete || session.version >= 24 || data.followups.length >= 2) return { data, next };
+  if (!next.complete || session.version >= 24 || data.followups.length >= MAX_CONSULTATION_FOLLOWUPS) return { data, next };
   const followup = await chooseFollowup(data, messages, { onDecision: onFollowupDecision });
   if (!followup) return { data, next };
   data.followups.push(followup);

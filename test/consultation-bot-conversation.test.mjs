@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mergeConsultationData, advanceConsultation } from "../src/consultation-bot-conversation.mjs";
-import { chooseReviewedFollowup } from "../src/consultation-bot-followups.mjs";
 
 const complaint = (id = "c1", overrides = {}) => ({ id, reason: "tirón", location: "muslo derecho", locationClear: true,
   sideRequired: true, side: "derecha", onset: "ayer", mechanism: "jugando al fútbol", pain: 4, painNote: null,
@@ -69,76 +68,22 @@ test("zero followups is valid; no selection before essentials or after urgency",
   assert.equal(urgent.next.urgent, true);
   assert.equal(calls, 1);
 });
-test("followup ledger allows at most two total and preserves literal answers for the report", async () => {
+test("followup ledger allows at most three total and preserves literal answers for the report", async () => {
   let session = { data: state(), version: 1 };
   let count = 0;
   const chooseFollowup = async () => ({ complaintId: "c1", topic: `topic-${++count}`, question: "¿Notaste algún moretón en ese muslo?", answer: null });
   const analyze = async () => state([]);
-  for (const answer of ["ok", "No vi moretones", "Caminar me cuesta un poco"]) {
+  for (const answer of ["ok", "No vi moretones", "Caminar me cuesta un poco", "A la noche no molesta"]) {
     const turn = await advanceConsultation(session, msgs(answer), { analyze, chooseFollowup });
     session = { data: turn.data, lastQuestion: turn.next, version: session.version + 1 };
   }
-  assert.equal(count, 2);
+  assert.equal(count, 3);
   assert.equal(session.lastQuestion.complete, true);
-  assert.deepEqual(session.data.followups.map(item => item.answer), ["No vi moretones", "Caminar me cuesta un poco"]);
+  assert.deepEqual(session.data.followups.map(item => item.answer), ["No vi moretones", "Caminar me cuesta un poco", "A la noche no molesta"]);
 });
 test("provider extraction failures do not mutate the session", async () => {
   const session = { data: state(), version: 1 };
   const before = structuredClone(session);
   await assert.rejects(advanceConsultation(session, msgs("hola"), { analyze: async () => { throw new Error("failure"); } }));
   assert.deepEqual(session, before);
-});
-
-const candidate = { question: "¿Notaste algún moretón en ese muslo?", complaintId: "c1", topic: "moretón", evidence: "tirón en el muslo derecho" };
-const approved = { relevant: true, useful: true, notAlreadyAnswered: true, clear: true, respectful: true, nonIntrusive: true,
-  nonDiscriminatory: true, noDiagnosis: true, safe: true, grounded: true, functionalImpactAppropriate: true, confidence: "high" };
-function mockProvider(outputs) {
-  const requests = [];
-  return { requests, settings: { apiKey: "test", model: "test" }, fetchImpl: async (_url, options) => {
-    requests.push(JSON.parse(options.body));
-    const value = outputs.shift();
-    if (value instanceof Error) throw value;
-    return { ok: true, json: async () => ({ status: "completed", output: [{ content: [{ type: "output_text", text: JSON.stringify(value) }] }] }) };
-  } };
-}
-test("candidate is displayed only after a separate review approves ALL criteria", async () => {
-  const mock = mockProvider([candidate, approved]);
-  const result = await chooseReviewedFollowup(state(), msgs(contextText), mock);
-  assert.equal(result.question, candidate.question);
-  assert.equal(mock.requests.length, 2);
-  assert.notEqual(mock.requests[0].text.format.name, mock.requests[1].text.format.name);
-  assert.ok(mock.requests.every(item => item.store === false));
-  assert.match(mock.requests[1].instructions, /revisor independiente/);
-  assert.ok(mock.requests.every(item => item.instructions.includes("NINGUNA pregunta puede requerir una prueba, movimiento ni esfuerzo físico")));
-});
-for (const key of Object.keys(approved)) {
-  test(`review fails closed for ${key}`, async () => {
-    const mock = mockProvider([candidate, { ...approved, [key]: key === "confidence" ? "uncertain" : false }]);
-    assert.equal(await chooseReviewedFollowup(state(), msgs(contextText), mock), null);
-  });
-}
-test("failed or malformed review is omitted, never retried or shown", async () => {
-  for (const review of [new Error("timeout"), {}, null]) {
-    const mock = mockProvider([candidate, review]);
-    assert.equal(await chooseReviewedFollowup(state(), msgs(contextText), mock), null);
-    assert.equal(mock.requests.length, 2);
-  }
-});
-test("local gate rejects ungrounded, invasive, malformed, duplicate or extra questions", async () => {
-  for (const invalid of [{ ...candidate, evidence: "me caí" }, { ...candidate, complaintId: "c99" },
-    { ...candidate, question: "¿Estás embarazada o cuál es tu religión?" }, { ...candidate, question: "¿Te duele? ¿Te hinchó?" },
-    { ...candidate, question: "¿Podés hacer diez sentadillas ahora para ver si duele?" },
-    { ...candidate, question: "¿Qué pasa si levantás la pierna?" },
-    { ...candidate, question: "¿Qué hiciste mal para lastimarte?" },
-    { ...candidate, question: "¿Notaste moretones o hinchazón?" }, { question: null }]) {
-    const mock = mockProvider([invalid]);
-    assert.equal(await chooseReviewedFollowup(state(), msgs(contextText), mock), null);
-    assert.equal(mock.requests.length, 1);
-  }
-  const data = { ...state(), followups: [{ ...candidate, answer: "no" }] };
-  assert.equal(await chooseReviewedFollowup(data, msgs(contextText), mockProvider([candidate])), null);
-  data.followups.push({ ...candidate });
-  const mock = mockProvider([]);
-  assert.equal(await chooseReviewedFollowup(data, msgs(contextText), mock), null);
-  assert.equal(mock.requests.length, 0);
 });

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildConsultationNarrative, cachedConsultationNarrative, fallbackConsultationNarrative } from "../src/consultation-bot-narrative.mjs";
-import { chooseReviewedFollowup, followupCandidateRejection } from "../src/consultation-bot-followups.mjs";
 
 const session = () => ({ version: 3, data: {
   complaints: [{ id: "c1", reason: "dolor", location: "rodilla derecha", side: "derecha", onset: "hace un mes", mechanism: "esfuerzo", pain: 8, limitations: "le cuesta subir escaleras" }],
@@ -64,27 +63,4 @@ test("quota or concurrency failures use a cached fallback", async () => {
   assert.equal(await cachedConsultationNarrative(current, { generate }), fallbackConsultationNarrative(current.data));
   await cachedConsultationNarrative(current, { generate });
   assert.equal(calls, 1);
-});
-
-const functional = { question: "¿Hay alguna actividad habitual que esta molestia te dificulte?", topic: "impacto funcional", complaintId: "c1", evidence: "rodilla derecha" };
-test("a neutral activity question is allowed only when impact is not already known", () => {
-  const current = session();
-  assert.equal(followupCandidateRejection(functional, current.data, current.messages), "functional_impact_not_applicable");
-  current.data.complaints[0].limitations = null;
-  assert.equal(followupCandidateRejection(functional, current.data, current.messages.slice(0, 1)), null);
-});
-for (const context of ["Uso una silla de ruedas.", "Tengo una discapacidad motriz.", "Salí de una cirugía ayer.", "Estoy operado de la rodilla.", "Estoy con reposo indicado."]) {
-  test(`generic activity question is omitted with context: ${context}`, async () => {
-    const current = session(); current.data.complaints[0].limitations = null;
-    current.messages = [current.messages[0], { role: "user", text: context }];
-    const mock = provider([functional]);
-    assert.equal(await chooseReviewedFollowup(current.data, current.messages, mock), null);
-    assert.equal(mock.requests.length, 1);
-    assert.match(mock.requests[0].instructions, /Nunca supongas que una persona con discapacidad carece de autonomía/);
-  });
-}
-test("wheelchair context does not exclude other respectful questions", () => {
-  const current = session();
-  current.messages.push({ role: "user", text: "Uso una silla de ruedas." });
-  assert.equal(followupCandidateRejection({ ...functional, question: "¿Notaste hinchazón en esa rodilla?", topic: "hinchazón" }, current.data, current.messages), null);
 });

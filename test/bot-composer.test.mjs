@@ -4,13 +4,14 @@ import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import vm from 'node:vm';
 
-const setup = async ({ audioLevel = 0.02, search = '' } = {}) => {
+const setup = async ({ audioLevel = 0.02, search = '', sessionOverrides = {} } = {}) => {
   let focused;
-  const element = () => ({
+  const element = tagName => ({
+    tagName, children: [],
     value: '', hidden: false, disabled: false, handlers: {},
     classList: { toggle() {}, add() {}, remove() {} },
     addEventListener(type, handler) { this.handlers[type] = handler; },
-    replaceChildren() {}, append() {}, removeAttribute() {}, setAttribute() {},
+    replaceChildren(...children) { this.children = children; }, append(...children) { this.children.push(...children); }, removeAttribute() {}, setAttribute() {},
     focus() { focused = this; }, scrollIntoView() {},
   });
   const elements = new Map();
@@ -41,7 +42,7 @@ const setup = async ({ audioLevel = 0.02, search = '' } = {}) => {
       queueMicrotask(() => this.onstop());
     }
   }
-  const session = { status: 'collecting', version: 0, instanceId: 'test-instance', messages: [], brand: { slug: '' } };
+  const session = { status: 'collecting', version: 0, instanceId: 'test-instance', messages: [], brand: { slug: '' }, ...sessionOverrides };
   const response = (data, ok = true) => ({ ok, json: async () => data });
   vm.runInNewContext(await readFile(new URL('../bot/app.js', import.meta.url), 'utf8'), {
     document: { getElementById: get, createElement: element, createTextNode: text => text, body: element() },
@@ -73,6 +74,14 @@ const setup = async ({ audioLevel = 0.02, search = '' } = {}) => {
     finish: (ok = true, overrides = {}) => resolveRequest(response(ok ? { session: { ...session, version: 1, ...overrides } } : { error: 'Error de prueba' }, ok)),
   };
 };
+
+test('summary values capitalize only the initial letter, preserving numbers and original facts', async () => {
+  const complaint = { reason: 'dolor', location: 'en la zona baja, lumbares', onset: '2 meses', mechanism: 'en el gimnasio, haciendo peso muerto', pain: 5 };
+  const app = await setup({ sessionOverrides: { status: 'complete', data: { complaints: [complaint], followups: [] } } });
+  const values = app.get('summary').children.flatMap(list => list.children).filter(node => node.tagName === 'dd').map(node => node.textContent);
+  assert.deepEqual(values, ['Dolor', 'En la zona baja, lumbares', '2 meses', 'En el gimnasio, haciendo peso muerto', '5/10']);
+  assert.equal(complaint.reason, 'dolor');
+});
 
 test('bot API requests stay on the current subdomain without forwarding form parameters', async () => {
   const app = await setup({ search: '?form=other-agreement' });

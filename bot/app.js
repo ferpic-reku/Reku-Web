@@ -62,7 +62,9 @@
   };
   const row = (list, label, value) => {
     const dt = document.createElement('dt'); dt.textContent = label;
-    const dd = document.createElement('dd'); dd.textContent = value || 'No informado';
+    const dd = document.createElement('dd');
+    const text = String(value || 'No informado').trim();
+    dd.textContent = text.replace(/^\p{L}/u, letter => letter.toLocaleUpperCase('es-AR'));
     list.append(dt, dd);
   };
   const render = () => {

@@ -54,7 +54,7 @@ export const renderConsultationReport = async (session, { narrative = fallbackCo
     doc.moveTo(48, doc.y - 6).lineTo(547, doc.y - 6).strokeColor("#e4ebef").stroke();
   };
   if (agreementLogo) {
-    doc.image(agreementLogo, 48, 43, { fit: [180, 50] });
+    doc.image(agreementLogo, 48, 50, { fit: [126, 35] });
     doc.image(rekuLogo, 464, 44, { fit: [83, 42] });
   } else doc.image(rekuLogo, 48, 43, { fit: [120, 52] });
   doc.y = 123;
